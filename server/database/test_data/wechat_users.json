@@ -1,0 +1,37 @@
+[
+  {
+    "phone": "13800000000",
+    "nickname": "小明",
+    "avatar": "http://avatar.url",
+    "create_time": 1718000000,
+    "openid": "wx123456"
+  },
+  {
+    "create_time": 1718000000,
+    "phone": "13800000000",
+    "nickname": "小明",
+    "avatar": "http://avatar.url",
+    "openid": "wx123456"
+  },
+  {
+    "create_time": 1718000000,
+    "avatar": "http://avatar.url",
+    "phone": "13800000000",
+    "nickname": "小明",
+    "openid": "wx123456"
+  },
+  {
+    "avatar": "http://avatar.url",
+    "openid": "wx123456",
+    "nickname": "小明",
+    "create_time": 1718000000,
+    "phone": "13800000000"
+  },
+  {
+    "openid": "wx123456",
+    "phone": "13800000000",
+    "nickname": "小明",
+    "create_time": 1718000000,
+    "avatar": "http://avatar.url"
+  }
+]

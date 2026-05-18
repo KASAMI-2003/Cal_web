@@ -1,0 +1,95 @@
+{
+  "tables": {
+    "wechat_users": {
+      "columns": {
+        "nickname": "string",
+        "phone": "string",
+        "openid": "string",
+        "create_time": "integer",
+        "avatar": "string"
+      },
+      "columns_order": [
+        "nickname",
+        "create_time",
+        "phone",
+        "openid",
+        "avatar"
+      ],
+      "created_at": 1750835886
+    },
+    "users": {
+      "columns": {
+        "username": "string",
+        "email": "string",
+        "phone": "string",
+        "password_hash": "string",
+        "create_time": "integer"
+      },
+      "columns_order": [
+        "email",
+        "username",
+        "password_hash",
+        "phone",
+        "create_time"
+      ],
+      "created_at": 1750835886
+    },
+    "compounds": {
+      "columns": {
+        "C13": "string",
+        "C12": "string",
+        "杨氏模量E-H": "string",
+        "晶格常数": "string",
+        "RESULT": "string",
+        "etmx": "string",
+        "A": "string",
+        "C33": "string",
+        "弹性刚度常数C11": "string",
+        "k取值": "string",
+        "理论值": "string",
+        "相对误差": "string",
+        "体积模量B_H": "string",
+        "晶体结构": "string",
+        "": "string",
+        "C44": "string",
+        "泊松比\\nu_H": "string",
+        "晶格常数数据来源": "string",
+        "备注": "string"
+      },
+      "columns_order": [
+        "A",
+        "备注",
+        "晶体结构",
+        "晶格常数",
+        "晶格常数数据来源",
+        "k取值",
+        "etmx",
+        "RESULT",
+        "杨氏模量E-H",
+        "理论值",
+        "",
+        "相对误差",
+        "体积模量B_H",
+        "理论值",
+        "",
+        "相对误差",
+        "泊松比\\nu_H",
+        "理论值",
+        "",
+        "相对误差",
+        "弹性刚度常数C11",
+        "理论值",
+        "",
+        "相对误差",
+        "C12",
+        "理论值",
+        "",
+        "相对误差",
+        "C44",
+        "C33",
+        "C13"
+      ],
+      "created_at": 1750834643
+    }
+  }
+}

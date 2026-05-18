@@ -1,0 +1,6 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Rust crate build artifacts (large; rebuild with cargo)
+database/target/

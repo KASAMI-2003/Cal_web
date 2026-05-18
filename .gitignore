@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Rust (server/database)
+server/database/target/
+
+# Frontend build output & deps (web/.gitignore also applies under web/)
+web/node_modules/
+web/dist/
+
+# Local env (never commit secrets)
+.env
+.env.local
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/

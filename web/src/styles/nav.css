@@ -1,0 +1,120 @@
+/* 只作用于顶部站点导航，避免污染页面内其他 nav（如平台子导航） */
+.site-header-nav,
+.site-header-nav * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.site-header-nav {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 60px !important;
+    background-color: #0f172a !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    z-index: 9999;
+}
+
+.site-header-nav__list {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    height: 100% !important;
+    padding: 0 20px !important;
+    list-style: none !important;
+    grid-auto-flow: unset !important;
+    grid-auto-columns: unset !important;
+    grid-template-rows: none !important;
+    grid-gap: 0 !important;
+}
+
+.site-header-nav__item {
+    height: 100%;
+    display: flex !important;
+    align-items: center !important;
+    margin: 0 10px !important;
+    float: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.site-header-nav ul,
+.site-header-nav li {
+    list-style: none !important;
+    display: block;
+}
+
+.site-header-nav .site-header-nav__list > .site-header-nav__item {
+    display: flex !important;
+}
+
+.site-header-nav__logo {
+    margin-right: 20px;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.site-header-nav__logo > a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 100% !important;
+    padding: 10px 0 !important;
+}
+
+.site-header-nav__logo-img {
+    height: 40px !important;
+    width: auto !important;
+    display: block !important;
+    object-fit: contain !important;
+}
+
+.site-header-nav__link {
+    color: #e5e7eb !important;
+    text-decoration: none !important;
+    font-family: "Microsoft YaHei", sans-serif !important;
+    font-size: 16px !important;
+    padding: 0 10px !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    position: relative !important;
+    background: none !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: color 0.3s ease !important;
+}
+
+.site-header-nav__link:hover {
+    color: #06b6d4 !important;
+}
+
+.site-header-nav__link--active {
+    color: #06b6d4 !important;
+}
+
+.site-header-nav__link--active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: #06b6d4;
+}
+
+/* 统一“我的”在最右侧，避免各页面因内联差异左右跳 */
+.site-header-nav__item--mine {
+    margin-left: auto !important;
+    justify-content: flex-end !important;
+}
+
+body {
+    padding-top: 60px !important;
+    min-height: 100vh;
+}

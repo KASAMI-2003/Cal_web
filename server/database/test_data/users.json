@@ -1,0 +1,48 @@
+[
+  {
+    "create_time": 1718000001,
+    "password_hash": "hash123",
+    "email": "user1@example.com",
+    "phone": "13900000000",
+    "username": "user1"
+  },
+  {
+    "email": "user1@example.com",
+    "create_time": 1718000001,
+    "password_hash": "hash123",
+    "username": "user1",
+    "phone": "13900000000"
+  },
+  {
+    "phone": "13900000000",
+    "password_hash": "hash123",
+    "username": "user1",
+    "email": "user1@example.com",
+    "create_time": 1718000001
+  },
+  {
+    "create_time": 1718000001,
+    "password_hash": "hash123",
+    "email": "user1@example.com",
+    "username": "user1",
+    "phone": "13900000000"
+  },
+  {
+    "email": "user1@example.com",
+    "create_time": 1718000001,
+    "phone": "13900000000",
+    "password_hash": "hash123",
+    "username": "user1"
+  },
+  {
+    "username": "KASMAI",
+    "password": "123456"
+  },
+  {
+    "phone": "",
+    "email": "2499166916@qq.com",
+    "username": "admin",
+    "create_time": 1771317796,
+    "password": "123456"
+  }
+]

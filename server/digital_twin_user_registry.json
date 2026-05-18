@@ -1,0 +1,54 @@
+{
+  "files": [
+    {
+      "id": "GNJl3GNcNbV4tuBBfWnyyQ",
+      "username": "admin",
+      "original_name": "alloy_elastic.dat",
+      "disk_path": "C:\\Users\\24991\\Desktop\\挑战杯\\WEB_FILE\\主页面\\user_twin_uploads\\admin\\GNJl3GNcNb_1776673508_alloy_elastic.dat",
+      "kind": "alloy_table",
+      "probe": {
+        "kind": "alloy_table",
+        "has_T": false,
+        "has_P": false,
+        "has_composition": true,
+        "T": {
+          "detected": false,
+          "note": "未检测到 T（无温压列或仅单点）"
+        },
+        "P": {
+          "detected": false,
+          "note": "未检测到 P（无温压列或仅单点）"
+        },
+        "composition": {
+          "detected": true,
+          "n": 12,
+          "labels": [
+            "TiZrVNb",
+            "TiZrNbMo",
+            "TiZrNbMoV0.25",
+            "TiZrNbMoV0.50",
+            "TiZrNbMoV0.75",
+            "TiZrNbMoV1.00",
+            "TiZrNbMoV1.25",
+            "TiZrNbMoV1.50",
+            "TiZrNbMo0.8",
+            "TiZrNbMo0.8V0.2",
+            "TiZrNbMo0.9",
+            "TiZrNbMo0.8V0.5"
+          ],
+          "field": "Alloy"
+        },
+        "columns": {
+          "alloy": "Alloy",
+          "c11": "c11",
+          "c12": "c12",
+          "c44": "c44",
+          "T": null,
+          "P": null,
+          "rho": null
+        }
+      },
+      "created_at": "2026-04-20 16:25:08"
+    }
+  ]
+}

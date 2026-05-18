@@ -1,0 +1,45 @@
+[
+  {
+    "id": "1771317842861",
+    "username": "admin",
+    "data": {
+      "id": "B"
+    },
+    "status": "rejected",
+    "created_at": "2026-02-17 16:44:02",
+    "reviewed_at": "2026-02-17 16:45:35"
+  },
+  {
+    "id": "1771317986915",
+    "username": "admin",
+    "data": {
+      "元素": "Cu",
+      "晶体结构": "fcc",
+      "晶格常数": "3.609"
+    },
+    "status": "approved",
+    "created_at": "2026-02-17 16:46:26",
+    "target_db": "element_inf",
+    "reviewed_at": "2026-02-17 16:46:35"
+  },
+  {
+    "id": "1778671277377",
+    "username": "admin",
+    "data": {
+      "元素": "U-Nb",
+      "备注": "TSX迁移测试"
+    },
+    "status": "rejected",
+    "created_at": "2026-05-13 19:21:17",
+    "reviewed_at": "2026-05-13 19:21:25"
+  },
+  {
+    "id": "1779095568138",
+    "username": "admin",
+    "data": {
+      "最后一次测试": "last"
+    },
+    "status": "pending",
+    "created_at": "2026-05-18 17:12:48"
+  }
+]
