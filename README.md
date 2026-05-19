@@ -47,6 +47,27 @@ npm run dev
 
 浏览器访问 Vite 提示的地址（默认 `http://localhost:5173`）。
 
+### 一键启动（前后端同机开发）
+
+先完成 **`web/`：`npm install`**，以及 **`server/`** 依赖与（可选）**`web/.env`**（端口与「终端 B」一致）。
+
+**Linux / macOS / Git Bash：**
+
+```bash
+chmod +x scripts/start-all.sh   # 仅需一次
+bash scripts/start-all.sh
+```
+
+**Windows PowerShell（项目根目录）：**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1
+```
+
+脚本会先拉起 **`server/pyserver.py`**（若存在 **`server/.venv`** 会自动使用该环境），再执行 **`web` 的 `npm run dev`**。按 **Ctrl+C** 结束前端时会一并结束后端进程。
+
+可选环境变量：**`PYTHON`**（指定 Python 可执行文件）、**`TERMINAL_WS_PORT`**、**`TSX_SKIP_RUST_SERVER=1`**（无 cargo 时）。
+
 ### Linux / macOS 说明
 
 - Python 侧建议使用 **`python3`**，并在 `server/` 下用虚拟环境安装依赖，例如：
