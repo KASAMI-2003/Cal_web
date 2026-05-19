@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # 一键启动：后端 pyserver（含可选 cargo）+ 前端 Vite 开发服务器
 # 用法：在项目根目录执行  bash scripts/start-all.sh
-# 环境变量：PYTHON（默认 python3）、TERMINAL_WS_PORT（默认 8765）、TSX_SKIP_RUST_SERVER=1 跳过 Rust
+# 环境变量：PYTHON（默认 python3.11）、TERMINAL_WS_PORT（默认 8765）、TSX_SKIP_RUST_SERVER=1 跳过 Rust
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON:-python3}"
+PYTHON_BIN="${PYTHON:-python3.11}"
 
 cd "$ROOT"
 
@@ -29,7 +29,7 @@ echo "[start-all] 启动后端: $ROOT/server ($PYTHON_BIN pyserver.py)"
   if [[ -f .venv/bin/activate ]]; then
     # shellcheck source=/dev/null
     source .venv/bin/activate
-    PYTHON_BIN="$(command -v python || command -v python3 || echo "$PYTHON_BIN")"
+    PYTHON_BIN="$(command -v python || command -v python3.11 || command -v python3 || echo "$PYTHON_BIN")"
   fi
   export TERMINAL_WS_PORT="${TERMINAL_WS_PORT:-8765}"
   exec "$PYTHON_BIN" pyserver.py
