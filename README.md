@@ -23,7 +23,7 @@ python pyserver.py
 也可在 `tsx-web-app/` 根目录执行 `python server/pyserver.py`：`pyserver` 会切换到 `server/` 再启动，静态资源路径与 `cargo run` 均相对于该目录解析。
 
 - 注意控制台里打印的 **HTTP 端口**（常为 `3569` 附近，可能自动顺延）。
-- `pyserver` 仍会尝试 `cargo run` 启动 `database/`（需本机安装 Rust toolchain）。
+- 若已在 PATH 中找到 **`cargo`**，`pyserver` 会启动 `database/`（Rust）；否则跳过（见下文 Linux 说明与环境变量 `TSX_SKIP_RUST_SERVER`）。
 
 ### 2. 启动前端（终端 B）
 
@@ -46,6 +46,20 @@ npm run dev
 ```
 
 浏览器访问 Vite 提示的地址（默认 `http://localhost:5173`）。
+
+### Linux / macOS 说明
+
+- Python 侧建议使用 **`python3`**，并在 `server/` 下用虚拟环境安装依赖，例如：
+  ```bash
+  cd server
+  python3 -m venv .venv
+  source .venv/bin/activate   # Windows 用 .venv\Scripts\activate
+  pip install -r requirements.txt
+  python3 pyserver.py
+  ```
+- 私钥路径与 Windows 相同逻辑：默认读取 **`~/.ssh/id_ed25519`** 或 **`id_rsa`**（`expanduser` 在各平台为当前用户主目录）。
+- 若机器未安装 Rust / `cargo`，`pyserver` 会跳过 `database/` 子进程并打日志；不需要 Rust API 时可设置环境变量 **`TSX_SKIP_RUST_SERVER=1`** 主动跳过。
+- **`digital_twin_user_registry.json`** 中的 `disk_path` 应为相对 `server/` 的路径（仓库内已修正）；旧版若仍为 Windows 绝对路径，启动后会在能解析到文件时自动改写为相对路径。
 
 ### 3. 静态资源说明
 

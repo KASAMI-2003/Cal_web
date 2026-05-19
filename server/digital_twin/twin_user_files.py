@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 用户上传的孪生 .dat：落盘 + 注册表；按 twin_file id 取回路径与探测结果。
+disk_path 在 JSON 中存为相对 server/ 的路径（POSIX 斜杠），便于跨平台迁移。
 """
 from __future__ import annotations
 
@@ -11,11 +12,11 @@ import secrets
 import time
 from typing import Any
 
-from twin_dat_probe import load_alloy_rows, probe_dat_bytes, probe_dat_path
+from twin_dat_probe import load_alloy_rows, probe_dat_bytes
 
-_MAIN_PAGE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-REGISTRY_PATH = os.path.join(_MAIN_PAGE, "digital_twin_user_registry.json")
-UPLOAD_ROOT = os.path.join(_MAIN_PAGE, "user_twin_uploads")
+SERVER_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+REGISTRY_PATH = os.path.join(SERVER_ROOT, "digital_twin_user_registry.json")
+UPLOAD_ROOT = os.path.join(SERVER_ROOT, "user_twin_uploads")
 
 _alloy_rows_cache: dict[str, list[dict[str, Any]]] = {}
 
@@ -24,19 +25,78 @@ def _safe_segment(s: str) -> str:
     return re.sub(r"[^\w\-\.]", "_", (s or "user")[:80])
 
 
-def _load_registry() -> dict[str, Any]:
-    if not os.path.isfile(REGISTRY_PATH):
-        return {"files": []}
-    try:
-        with open(REGISTRY_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"files": []}
+def resolve_disk_path_for_entry(entry: dict[str, Any]) -> str | None:
+    """
+    将注册表中的 disk_path（相对 server/、绝对路径或旧版 Windows 路径）解析为当前机器上的绝对路径。
+    """
+    raw = (entry.get("disk_path") or "").strip()
+    if not raw:
+        return None
+
+    n = os.path.normpath(raw.replace("\\", os.sep))
+    if os.path.isabs(n) and os.path.isfile(n):
+        return n
+
+    rel = raw.replace("\\", "/").strip("/")
+    cand = os.path.normpath(os.path.join(SERVER_ROOT, rel))
+    if os.path.isfile(cand):
+        return cand
+
+    low = raw.replace("\\", "/").lower()
+    marker = "user_twin_uploads/"
+    if marker in low:
+        idx = low.find(marker)
+        tail = raw[idx:].replace("\\", "/")
+        cand2 = os.path.normpath(os.path.join(SERVER_ROOT, *tail.split("/")))
+        if os.path.isfile(cand2):
+            return cand2
+
+    user = _safe_segment((entry.get("username") or "").strip())
+    base = os.path.basename(raw.replace("\\", os.sep))
+    cand3 = os.path.normpath(os.path.join(UPLOAD_ROOT, user, base))
+    if os.path.isfile(cand3):
+        return cand3
+
+    return None
+
+
+def _portable_disk_path(abs_path: str) -> str:
+    """写入注册表：相对 server/，统一为正斜杠。"""
+    rel = os.path.relpath(abs_path, SERVER_ROOT)
+    return rel.replace("\\", "/")
 
 
 def _save_registry(data: dict[str, Any]) -> None:
     with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _load_registry() -> dict[str, Any]:
+    if not os.path.isfile(REGISTRY_PATH):
+        return {"files": []}
+    try:
+        with open(REGISTRY_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {"files": []}
+
+    changed = False
+    for e in data.get("files") or []:
+        resolved = resolve_disk_path_for_entry(e)
+        if not resolved:
+            continue
+        portable = _portable_disk_path(resolved)
+        if e.get("disk_path") != portable:
+            e["disk_path"] = portable
+            changed = True
+
+    if changed:
+        try:
+            _save_registry(data)
+        except Exception:
+            pass
+
+    return data
 
 
 def register_user_dat(username: str, raw: bytes, original_filename: str) -> dict[str, Any]:
@@ -61,7 +121,7 @@ def register_user_dat(username: str, raw: bytes, original_filename: str) -> dict
         "id": file_id,
         "username": username.strip(),
         "original_name": original_filename,
-        "disk_path": disk_path,
+        "disk_path": _portable_disk_path(disk_path),
         "kind": probe["kind"],
         "probe": probe,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
@@ -106,10 +166,13 @@ def get_entry(file_id: str, username: str | None) -> dict[str, Any] | None:
     return None
 
 
-def ensure_alloy_cache(file_id: str, disk_path: str) -> list[dict[str, Any]]:
+def ensure_alloy_cache(file_id: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
     if file_id in _alloy_rows_cache:
         return _alloy_rows_cache[file_id]
-    rows, _ = load_alloy_rows(disk_path)
+    path = resolve_disk_path_for_entry(entry)
+    if not path:
+        return []
+    rows, _ = load_alloy_rows(path)
     _alloy_rows_cache[file_id] = rows
     return rows
 
@@ -202,7 +265,7 @@ def apply_htem_session_for_entry(entry: dict[str, Any] | None) -> None:
     from htem_sam_bridge import set_session_elasticity_dat
 
     if entry and entry.get("kind") == "htem_grid":
-        path = entry.get("disk_path")
+        path = resolve_disk_path_for_entry(entry)
         if path and os.path.isfile(path):
             set_session_elasticity_dat(path)
             return

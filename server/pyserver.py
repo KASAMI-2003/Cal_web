@@ -8,8 +8,6 @@ import re #正则表达式
 import platform
 import sys
 import logging
-import tkinter as tk
-from tkinter import messagebox
 from mp_api.client import MPRester
 import pandas as pd
 import csv
@@ -23,6 +21,9 @@ from ase.neighborlist import NeighborList
 from ase import Atoms
 from ase.lattice.cubic import BodyCenteredCubic
 import os
+
+# 无图形界面环境（常见 Linux 服务器）下避免 matplotlib 选用需要 Tk/Qt 的后端
+os.environ.setdefault('MPLBACKEND', 'Agg')
 
 # tsx-web-app：后端根目录固定为当前本文件所在目录（与「主页面」上级路径解耦）
 SERVER_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -506,7 +507,7 @@ def _twin_resolve_alloy_row(qs):
         comp_i = int((qs.get('comp_index') or ['0'])[0])
     except (TypeError, ValueError):
         comp_i = 0
-    rows = ensure_alloy_cache(tf, entry['disk_path'])
+    rows = ensure_alloy_cache(tf, entry)
     if not rows:
         return None, entry
     return rows[comp_i % len(rows)], entry
@@ -2267,9 +2268,16 @@ if __name__ == "__main__":
     http_thread = threading.Thread(target=run_http_server)
     http_thread.start()
 
-    # 启动 Rust 服务器（database/ 相对于 tsx-web-app/server）
+    # 启动 Rust 服务器（database/ 相对于 tsx-web-app/server）；Linux 无 Rust 时可跳过
     _rust_cwd = os.path.join(SERVER_ROOT, 'database')
-    rust_proc = subprocess.Popen(["cargo", "run"], cwd=_rust_cwd)
+    rust_proc = None
+    _skip_rust = os.environ.get('TSX_SKIP_RUST_SERVER', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    if _skip_rust:
+        logging.info('已跳过 Rust database 服务（环境变量 TSX_SKIP_RUST_SERVER）')
+    elif shutil.which('cargo'):
+        rust_proc = subprocess.Popen(["cargo", "run"], cwd=_rust_cwd)
+    else:
+        logging.warning('未在 PATH 中找到 cargo，已跳过 Rust database 服务（安装 Rust 或设置 TSX_SKIP_RUST_SERVER=1 可抑制本警告）')
 
     try:
         # 保持主线程运行
@@ -2279,4 +2287,5 @@ if __name__ == "__main__":
         print("\n正在关闭服务器...")
         sys.exit(0)
     finally:
-        rust_proc.terminate()
+        if rust_proc is not None:
+            rust_proc.terminate()
