@@ -2278,10 +2278,23 @@ if __name__ == "__main__":
     _skip_rust = os.environ.get('TSX_SKIP_RUST_SERVER', '').strip().lower() in ('1', 'true', 'yes', 'on')
     if _skip_rust:
         logging.info('已跳过 Rust database 服务（环境变量 TSX_SKIP_RUST_SERVER）')
-    elif shutil.which('cargo'):
-        rust_proc = subprocess.Popen(["cargo", "run"], cwd=_rust_cwd)
     else:
-        logging.warning('未在 PATH 中找到 cargo，已跳过 Rust database 服务（安装 Rust 或设置 TSX_SKIP_RUST_SERVER=1 可抑制本警告）')
+        _rust_release = os.path.join(_rust_cwd, 'target', 'release', 'database')
+        _rust_debug = os.path.join(_rust_cwd, 'target', 'debug', 'database')
+        if os.path.isfile(_rust_release):
+            rust_proc = subprocess.Popen([_rust_release], cwd=_rust_cwd)
+            logging.info('已启动 Rust database（release 二进制）: %s', _rust_release)
+        elif os.path.isfile(_rust_debug):
+            rust_proc = subprocess.Popen([_rust_debug], cwd=_rust_cwd)
+            logging.info('已启动 Rust database（debug 二进制）: %s', _rust_debug)
+        elif shutil.which('cargo'):
+            rust_proc = subprocess.Popen(["cargo", "run"], cwd=_rust_cwd)
+            logging.info('已通过 cargo run 启动 Rust database（首次编译可能需数分钟）')
+        else:
+            logging.warning(
+                '未找到 Rust database 可执行文件或 cargo，已跳过（'
+                '在 database/ 下执行 cargo build --release，或安装 Rust 并加入 PATH）'
+            )
 
     try:
         # 保持主线程运行

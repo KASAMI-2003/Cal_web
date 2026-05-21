@@ -91,6 +91,64 @@ powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1
 
 终端在浏览器里连接的是 **`/api/ssh/ws`（相对当前页面，即 Vite 的 host:5173）**，再由 Vite 转到本机 Python 上的终端 WebSocket 端口（默认与环境变量 `TERMINAL_WS_PORT` 一致，多为 `8765`）。`VITE_PYTHON_API_ORIGIN` 只对应 **HTTP API**，不能用来连终端；若 Python 日志提示终端端口已从默认值改掉，请在启动 `npm run dev` 的环境里同步设置相同的 `TERMINAL_WS_PORT`。
 
+## 生产部署（Nginx + systemd）
+
+### 服务分工
+
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| **Rust `database/`** | `8088` | **注册、登录、用户资料**（`/register`、`/login`、`/users/*`） |
+| **Python `pyserver.py`** | `3569`（附近） | 业务 API、`/api/*`、`/img`、WebSocket 终端 |
+| **Nginx** | `443` | 静态前端 + 反代上述服务 |
+
+**注册 405 的常见原因**：前端请求 `POST /register`，但 Nginx 只配置了静态 `location /`，未把 `/register` 反代到 **8088**。
+
+### 1. 构建前端
+
+```bash
+cd web
+cp .env.production.example .env.production   # 改成你的 HTTPS 域名
+npm ci
+npm run build
+```
+
+`.env.production` 示例：
+
+```env
+VITE_PYTHON_API_ORIGIN=https://calweb.physedu.top
+VITE_RUST_API_ORIGIN=https://calweb.physedu.top
+```
+
+### 2. Nginx
+
+参考 **[deploy/nginx-calweb.conf.example](deploy/nginx-calweb.conf.example)** 复制到 `/etc/nginx/conf.d/cal_web.conf`。
+
+要点：
+
+- **`/register`、`/login`、`/users/`** → `127.0.0.1:8088`（Rust）
+- **`/api/`** → `127.0.0.1:3569`（Python，**不要** `rewrite` 去掉 `/api` 前缀）
+- **`/api/ssh/ws`** → 终端 WebSocket 端口（默认 `8765`）
+
+### 3. 后端常驻（systemd 示例）
+
+只保留 **一个** `pyserver` 进程；若手动 `python pyserver.py` 与 systemd 同时跑，会出现 `Address already in use`，HTTP 起不来只剩 WebSocket。
+
+```bash
+sudo systemctl stop calweb-backend    # 手动调试前先停服务
+# 确认 3569 / 8765 未被占用
+sudo ss -tlnp | grep -E '3569|8088|8765'
+sudo systemctl start calweb-backend
+```
+
+确认 Rust 在监听：
+
+```bash
+curl -s http://127.0.0.1:8088/health
+curl -s http://127.0.0.1:3569/ -o /dev/null -w '%{http_code}\n'
+```
+
+**502 的常见原因**：Nginx 已反代 `/register` → 8088，但 Rust 未启动。systemd 里若 PATH 不含 `~/.cargo/bin`，`cargo` 找不到会直接跳过 Rust。解决：先 `cargo build --release`，再用 **[deploy/calweb-backend.service.example](deploy/calweb-backend.service.example)**（含 PATH）重启服务。
+
 ## 与旧目录的关系
 
 - 顶栏样式在 `web/src/styles/nav.css`，入口见 `web/src/main.tsx`。

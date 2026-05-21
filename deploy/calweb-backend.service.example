@@ -1,0 +1,27 @@
+# 复制到 /etc/systemd/system/calweb-backend.service 后：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now calweb-backend
+#
+# 部署前在 server/database 编译 Rust（注册/登录依赖 8088）：
+#   cd /opt/cal_web/Cal_web/server/database
+#   cargo build --release
+#
+# 确认 Rust 已监听：
+#   curl -s http://127.0.0.1:8088/health
+
+[Unit]
+Description=Cal Web Python + Rust backend (pyserver.py)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/cal_web/Cal_web/server
+Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cal_web/Cal_web/server/.venv/bin/python pyserver.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
