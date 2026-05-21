@@ -392,6 +392,11 @@ def find_available_port(start_port):
         port += 1
     return port
 
+
+class ReuseAddrTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
 async def start_websocket_server():
     global websocket_port
     try:
@@ -2260,11 +2265,8 @@ def run_http_server():
 
         port = preferred
         if is_port_in_use(preferred):
-            logging.error(
-                'HTTP 端口 %s 已被占用（Nginx 反代将 502）。等待释放…',
-                preferred,
-            )
-            for attempt in range(10):
+            logging.warning('HTTP 端口 %s 被占用，等待释放…', preferred)
+            for _ in range(15):
                 time.sleep(1)
                 if not is_port_in_use(preferred):
                     break
@@ -2272,7 +2274,7 @@ def run_http_server():
                 logging.error('HTTP 端口 %s 仍被占用，HTTP 服务未启动', preferred)
                 return
 
-        with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
+        with ReuseAddrTCPServer(("0.0.0.0", port), Handler) as httpd:
             logging.info('HTTP 服务器监听 0.0.0.0:%s', port)
             print(f"HTTP服务器运行在端口 {port},http://localhost:{port}")
             print("Starting HTTP server...")

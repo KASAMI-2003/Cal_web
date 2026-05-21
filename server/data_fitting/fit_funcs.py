@@ -1,6 +1,6 @@
 import numpy as np
 
-from fit_tools import gaussianElimination
+from .fit_tools import gaussianElimination
 
 
 def polynomialFit(x, y, degree):
