@@ -1,10 +1,13 @@
 # 复制到服务器：/etc/nginx/conf.d/cal_web.conf
 # 修改 server_name、root、证书路径后：sudo nginx -t && sudo systemctl reload nginx
 #
-# 重要：
-# - 注册/登录走 Rust database（8088），不是 Python
-# - Python 的 /api/* 不要 rewrite 去掉前缀（pyserver 路由本身带 /api）
-# - 构建前端时设置 VITE_* 为 https://你的域名（见 web/.env.production.example）
+# 路由分工：
+#   Rust 8088  → /register /login /users/*
+#   Python 3569 → /api/* 以及下列不带 /api 前缀的旧接口：
+#     /mysql_receive /page2_search /data_input/* /create_lattice_picture /websocket_port /img/*
+#   WebSocket 8765 → /api/ssh/ws（须在 /api/ 之前单独配置）
+#
+# 切勿对 /api/ 做 rewrite 去掉前缀（pyserver 路由本身含 /api）
 
 server {
     listen 80;
@@ -24,11 +27,17 @@ server {
     root /opt/cal_web/Cal_web/web/dist;
     index index.html;
 
-    location / {
-        try_files $uri /index.html;
+    # ① WebSocket（必须写在 /api/ 之前）
+    location /api/ssh/ws {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
     }
 
-    # Rust 用户 API（注册 / 登录 / 个人资料）→ database/ 8088
+    # ② Rust 用户 API
     location ~ ^/(register|login|users/) {
         proxy_pass http://127.0.0.1:8088;
         proxy_http_version 1.1;
@@ -38,7 +47,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Python API（路径原样转发，不要 rewrite 去掉 /api）
+    # ③ Python /api/*（原样转发，不要 rewrite）
     location /api/ {
         proxy_pass http://127.0.0.1:3569;
         proxy_http_version 1.1;
@@ -46,16 +55,20 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 120s;
     }
 
-    # Python 其它路由（pyserver 里不带 /api 前缀的接口）
-    location ~ ^/(mysql_receive|page2_search|data_input/|create_lattice_picture|websocket_port) {
+    # ④ Python 旧路径（无 /api 前缀）—— 缺此块会导致 POST 405
+    location ~ ^/(mysql_receive|page2_search|data_input|create_lattice_picture|websocket_port)(/|$) {
         proxy_pass http://127.0.0.1:3569;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 120s;
     }
 
     location /img/ {
@@ -63,13 +76,8 @@ server {
         proxy_set_header Host $host;
     }
 
-    # 终端 WebSocket（端口与 pyserver 的 TERMINAL_WS_PORT 一致，默认 8765）
-    location /api/ssh/ws {
-        proxy_pass http://127.0.0.1:8765;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
+    # ⑤ 前端 SPA（放最后）
+    location / {
+        try_files $uri /index.html;
     }
 }
