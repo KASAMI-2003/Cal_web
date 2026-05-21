@@ -10,6 +10,8 @@ import { getAuthState } from '../auth/authStore';
 import { PERIODIC_ELEMENTS } from '../data/periodicTable';
 import type { DataInputApplication } from '../types/contracts';
 
+const VALID_ELEMENT_SYMBOLS = new Set(PERIODIC_ELEMENTS.map((element) => element.symbol));
+
 type TerminalState = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
 type SearchKind = 'elements' | 'materials';
 type VizTab = 'elements' | 'detail' | 'terminal' | 'input';
@@ -163,14 +165,44 @@ function getElementCategory(atomicNumber: number, symbol: string): ElementCatego
 }
 
 function extractSymbolsFromFormula(formulaText: string): string[] {
-  // Match chemical element tokens in formula-like strings, e.g. SrNbO3 -> Sr, Nb, O.
   const matches = formulaText.match(/[A-Z][a-z]?/g) ?? [];
-  return Array.from(new Set(matches));
+  return Array.from(new Set(matches.filter((symbol) => VALID_ELEMENT_SYMBOLS.has(symbol))));
+}
+
+function normalizeLocalMaterialId(rawId: string | number | undefined, fallback = 'item'): string {
+  const text = String(rawId ?? '').trim();
+  if (!text || text === 'db-meta') {
+    return 'db-meta';
+  }
+  const core = text.replace(/^(dbm?-)/i, '');
+  if (/^\d+$/.test(core)) {
+    return `db-${core}`;
+  }
+  if (text.startsWith('db-')) {
+    return text;
+  }
+  return `db-${core || fallback}`;
+}
+
+function formatMaterialDisplayId(option: MaterialOption): string {
+  if (option.sourceType === 'mp') {
+    return normalizeMpApiId(option.id);
+  }
+  const raw = option.data.id ?? option.id;
+  return normalizeLocalMaterialId(String(raw ?? option.id));
 }
 
 function getCandidateElementSet(option: MaterialOption): Set<string> {
   const data = option.data;
   const set = new Set<string>();
+
+  if (data.u_at_pct != null && Number(data.u_at_pct) > 0) {
+    set.add('U');
+  }
+  if (data.nb_at_pct != null && Number(data.nb_at_pct) > 0) {
+    set.add('Nb');
+  }
+
   const formulaKeys = ['化学式', 'formula_pretty', 'db_formula', 'material_name', 'formula', '元素', 'element', '当前查询'];
   formulaKeys.forEach((key) => {
     const value = data[key];
@@ -179,8 +211,18 @@ function getCandidateElementSet(option: MaterialOption): Set<string> {
     }
   });
 
-  const elementsField = data.elements;
-  if (Array.isArray(elementsField)) {
+  const elementsField = data.elements ?? data.元素;
+  if (typeof elementsField === 'string' && elementsField.trim()) {
+    elementsField
+      .trim()
+      .split(/\s+/)
+      .forEach((item) => {
+        const sym = item.trim();
+        if (VALID_ELEMENT_SYMBOLS.has(sym)) {
+          set.add(sym);
+        }
+      });
+  } else if (Array.isArray(elementsField)) {
     elementsField.forEach((item) => {
       if (typeof item === 'string') {
         extractSymbolsFromFormula(item).forEach((symbol) => set.add(symbol));
@@ -347,11 +389,11 @@ function getMaterialFormulaPretty(option: MaterialOption): string {
   return String(data.化学式 ?? data.formula_pretty ?? data.db_formula ?? option.title ?? '').trim();
 }
 
-/** 下拉框一行展示：元素 · 化学式 · mp-id（或非 MP 的列表 id） */
+/** 下拉框一行展示：元素 · 化学式 · mp-id / db-id */
 function buildMaterialPickerLabel(option: MaterialOption): string {
   const formula = getMaterialFormulaPretty(option);
   const elems = formatMaterialElementsSummary(option.data);
-  const idPart = option.sourceType === 'mp' ? normalizeMpApiId(option.id) : option.id;
+  const idPart = formatMaterialDisplayId(option);
   const elemSeg = elems ? `[${elems}] ` : '';
   const formulaSeg = formula || option.title || '—';
   return `${elemSeg}${formulaSeg} · ${idPart}`;
@@ -360,7 +402,10 @@ function buildMaterialPickerLabel(option: MaterialOption): string {
 function materialMatchesPickerQuery(option: MaterialOption, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const idTokens = option.sourceType === 'mp' ? [option.id, normalizeMpApiId(option.id)] : [option.id];
+  const idTokens =
+    option.sourceType === 'mp'
+      ? [option.id, normalizeMpApiId(option.id)]
+      : [option.id, formatMaterialDisplayId(option)];
   const hay = [
     ...idTokens,
     getMaterialFormulaPretty(option),
@@ -376,7 +421,7 @@ function materialMatchesPickerQuery(option: MaterialOption, query: string): bool
 function buildSearchCardSubtitle(option: MaterialOption): string {
   const elems = formatMaterialElementsSummary(option.data);
   const formula = getMaterialFormulaPretty(option);
-  const idPart = option.sourceType === 'mp' ? normalizeMpApiId(option.id) : option.id;
+  const idPart = formatMaterialDisplayId(option);
   const parts: string[] = [];
   if (elems) parts.push(`元素 ${elems}`);
   if (formula) parts.push(`化学式 ${formula}`);
@@ -1738,46 +1783,62 @@ export function VisualizationPage() {
       try {
         await pythonApi.submitElement({ element: elementFormula, num_element: droppedSymbols.length || 1 });
         const mpRaw = await pythonApi.queryData();
-        mpOptions = parseMpApiMaterials(mpRaw.message);
-      } catch {
-        // Keep local candidates when MP API is unavailable.
+        const mpLines = mpRaw.message ?? [];
+        const mpError = mpLines.find(
+          (line) =>
+            String(line).includes('MP-API请求失败') ||
+            String(line).startsWith('获取数据时出错') ||
+            String(line).startsWith('获取数据时发生错误'),
+        );
+        if (mpError) {
+          setStatus(String(mpError));
+        }
+        mpOptions = parseMpApiMaterials(mpLines);
+      } catch (mpErr) {
+        setStatus(`MP-API 不可用: ${(mpErr as Error).message}`);
       }
       const options: MaterialOption[] = [];
 
       (page2Res.elements ?? []).forEach((item, idx) => {
         const data = item as Record<string, unknown>;
-        const id = `element-${idx}-${data.元素 ?? data.element ?? idx}`;
+        const id = normalizeLocalMaterialId(String(data.元素 ?? data.element ?? idx), `element-${idx}`);
         options.push({
           id,
           title: String(data.元素 ?? data.element ?? '元素'),
           sourceType: 'local',
           tag: 'element_inf',
           kind: 'elements',
-          data,
+          data: { ...data, id },
         });
       });
 
       (page2Res.materials ?? []).forEach((item, idx) => {
         const data = item as Record<string, unknown>;
         const isMp = data.source === 'Materials Project' || String(data.data_source ?? '').includes('Materials Project');
+        const id = isMp
+          ? String(data.id ?? `material-${idx}`).startsWith('mp-')
+            ? String(data.id)
+            : `mp-${data.id ?? idx}`
+          : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`);
         options.push({
-          id: String(data.id ?? `material-${idx}`),
+          id,
           title: String(data.material_name ?? data.id ?? '化合物'),
           sourceType: isMp ? 'mp' : 'local',
           tag: isMp ? 'MP' : 'materials',
           kind: 'materials',
-          data,
+          data: { ...data, id: isMp ? id : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`) },
         });
       });
 
       (mysqlRes.db_materials ?? []).forEach((item) => {
+        const id = normalizeLocalMaterialId(item.id as string | number | undefined);
         options.push({
-          id: `dbm-${item.id ?? crypto.randomUUID()}`,
+          id,
           title: String(item.material_name ?? item.db_formula ?? item.id ?? '本地材料'),
           sourceType: 'local',
           tag: 'db_materials',
           kind: 'materials',
-          data: item,
+          data: { ...item, id },
         });
       });
 
@@ -1809,14 +1870,13 @@ export function VisualizationPage() {
       });
       const merged = Array.from(dedup.values());
       const requiredSymbols = Array.from(new Set(droppedSymbols));
-      const preciseMatched = merged.filter((opt) => matchesSelectedSymbols(opt, requiredSymbols));
-      const finalOptions = preciseMatched;
-      setMaterialOptions(finalOptions);
-      if (finalOptions.length > 0) {
-        setSelectedMaterialId(finalOptions[0].id);
+      const matched = merged.filter((opt) => matchesSelectedSymbols(opt, requiredSymbols));
+      setMaterialOptions(matched);
+      if (matched.length > 0) {
+        setSelectedMaterialId(matched[0].id);
       }
       setSearchCards(
-        finalOptions.map((opt) => ({
+        matched.map((opt) => ({
           id: opt.id,
           kind: opt.kind,
           title: getMaterialFormulaPretty(opt) || opt.title,
@@ -1828,8 +1888,8 @@ export function VisualizationPage() {
             .map(([key, value]) => ({ key, value: String(value) })),
         })),
       );
-      setSearchEmptyText(finalOptions.length === 0 ? '未找到匹配数据' : '');
-      setStatus(`检索完成：${finalOptions.length} 条精确匹配数据`);
+      setSearchEmptyText(matched.length === 0 ? '未找到与所选元素匹配的数据' : '');
+      setStatus(`检索完成：${matched.length} 条匹配数据（${requiredSymbols.join(', ')}）`);
     } catch (error) {
       setMaterialOptions([]);
       setSelectedMaterialId('');

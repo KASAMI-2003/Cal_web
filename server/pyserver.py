@@ -1179,66 +1179,100 @@ def show_error_message(message, title="错误"):
         logging.error(f"{title}: {message}")
         print(f"\n错误: {message}", file=sys.stderr)
 
+
+def _get_mp_api_key():
+    return os.environ.get('MP_API_KEY', 'ROFXH1OkrD7GvcFFOasGetGk0asrzOE4').strip()
+
+
+def _build_chemsys_from_element(element):
+    """与主页面/pyserver.py get_data 一致的 chemsys 构造。"""
+    element = (element or '').strip()
+    if not element:
+        return ''
+    if '-' in element:
+        processed_elements = []
+        for elem in element.split('-'):
+            match = re.match(r'(\d*)([A-Za-z]+)', elem)
+            if match:
+                count, symbol = match.groups()
+                count = int(count) if count else 1
+                processed_elements.extend([symbol] * count)
+            else:
+                processed_elements.append(elem)
+        return '-'.join(sorted(processed_elements))
+    match = re.match(r'(\d*)([A-Za-z]+)', element)
+    if match:
+        count, symbol = match.groups()
+        count = int(count) if count else 1
+        return '-'.join([symbol] * count)
+    return element
+
+
+def _looks_like_element_query(query):
+    query = (query or '').strip()
+    if not query or not re.fullmatch(r'[\dA-Za-z\-]+', query):
+        return False
+    if '-' in query:
+        parts = [p.strip() for p in query.split('-') if p.strip()]
+        return bool(parts) and all(re.fullmatch(r'(\d*)([A-Za-z]+)', p) for p in parts)
+    return bool(re.fullmatch(r'(\d*)([A-Za-z]+)', query))
+
+
+_MP_SUMMARY_FIELDS_FULL = [
+    'material_id',
+    'formula_pretty',
+    'volume',
+    'density',
+    'formation_energy_per_atom',
+    'band_gap',
+    'total_magnetization',
+    'nsites',
+    'symmetry',
+    'energy_above_hull',
+    'is_stable',
+    'is_metal',
+    'elements',
+    'nelements',
+    'composition',
+    'structure',
+    'bulk_modulus',
+    'shear_modulus',
+]
+
+_MP_SUMMARY_FIELDS_PAGE2 = [
+    'material_id',
+    'formula_pretty',
+    'symmetry',
+    'structure',
+    'elements',
+]
+
+
+def _mp_search_by_element(mpr, element, fields, limit=None):
+    """统一 MP 检索：materials.summary.search(chemsys=[...])。"""
+    chemsys = _build_chemsys_from_element(element)
+    if not chemsys:
+        return []
+    kwargs = {'chemsys': [chemsys], 'fields': fields}
+    if limit is not None:
+        kwargs['chunk_size'] = max(500, limit)
+        kwargs['limit'] = limit
+    docs = mpr.materials.summary.search(**kwargs)
+    return list(docs) if docs is not None else []
+
+
 def get_data(element, num_element):
     try:
         logging.info("==================== 开始获取数据 ====================")
         logging.info(f"请求元素: {element}, 元素数量: {num_element}")
-        
-        with MPRester("ROFXH1OkrD7GvcFFOasGetGk0asrzOE4") as mpr:
-            # 将元素转换为正确的格式
-            if '-' in element:
-                elements = element.split('-')
-                # 处理类似 2U-Nb 的格式
-                processed_elements = []
-                for elem in elements:
-                    # 检查是否有数字前缀
-                    match = re.match(r'(\d*)([A-Za-z]+)', elem)
-                    if match:
-                        count, symbol = match.groups()
-                        count = int(count) if count else 1
-                        processed_elements.extend([symbol] * count)
-                    else:
-                        processed_elements.append(elem)
-                chemsys = '-'.join(sorted(processed_elements))
-            else:
-                # 处理单个元素的情况
-                match = re.match(r'(\d*)([A-Za-z]+)', element)
-                if match:
-                    count, symbol = match.groups()
-                    count = int(count) if count else 1
-                    chemsys = '-'.join([symbol] * count)
-                else:
-                    chemsys = element
-                num_element = 1
 
+        with MPRester(_get_mp_api_key()) as mpr:
+            chemsys = _build_chemsys_from_element(element)
             logging.info(f"处理后的化学式: {chemsys}")
-            
+
             try:
                 logging.info("正在查询 Materials Project API...")
-                # 使用 materials.summary.search 方法
-                docs = mpr.materials.summary.search(
-                    chemsys=[chemsys],
-                    fields=[
-                        "material_id",
-                        "formula_pretty",
-                        "volume",
-                        "density",
-                        "formation_energy_per_atom",
-                        "band_gap",
-                        "total_magnetization",
-                        "nsites",
-                        "symmetry",
-                        "energy_above_hull",
-                        "is_stable",
-                        "is_metal",
-                        "elements",
-                        "nelements",
-                        "composition",
-                        "structure",
-                        "bulk_modulus",
-                        "shear_modulus"
-                    ]
-                )
+                docs = _mp_search_by_element(mpr, element, fields=_MP_SUMMARY_FIELDS_FULL, limit=None)
                 logging.info(f"API查询完成，获取到 {len(docs)} 条记录")
             except Exception as api_error:
                 logging.error(f"MP-API请求失败: {str(api_error)}")
@@ -1958,16 +1992,17 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
     results = []
     if not query or len(query) < 1:
         return results
-    q = str(query).strip().lower()
-    q_cap = str(query).strip()[0].upper() + str(query).strip()[1:] if len(query) > 1 else str(query).strip().upper()
-    limit = 50
+    q = str(query).strip()
+    q_lower = q.lower()
+    q_cap = q[:1].upper() + q[1:] if len(q) > 1 else q.upper()
+    limit = 1000
 
     try:
-        with MPRester("ROFXH1OkrD7GvcFFOasGetGk0asrzOE4") as mpr:
+        with MPRester(_get_mp_api_key()) as mpr:
             crystal_map = {"fcc": "cubic", "bcc": "cubic", "立方": "cubic", "六方": "hexagonal", "四方": "tetragonal", "正交": "orthorhombic", "单斜": "monoclinic"}
-            crystal_system = crystal_map.get(q) or (q if q in ("cubic", "hexagonal", "tetragonal", "orthorhombic", "monoclinic", "trigonal", "triclinic") else None)
+            crystal_system = crystal_map.get(q_lower) or (q_lower if q_lower in ("cubic", "hexagonal", "tetragonal", "orthorhombic", "monoclinic", "trigonal", "triclinic") else None)
 
-            kwargs = {"chunk_size": 500, "limit": limit, "fields": ["material_id", "formula_pretty", "symmetry", "structure"]}
+            kwargs = {"chunk_size": 500, "limit": limit, "fields": _MP_SUMMARY_FIELDS_PAGE2}
             docs = []
 
             if crystal_system and (search_in == "property" or search_in == "all"):
@@ -1979,13 +2014,20 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
                     except (TypeError, AttributeError):
                         pass
 
-            if not docs:
+            if not docs and _looks_like_element_query(q):
+                try:
+                    docs = _mp_search_by_element(mpr, q, fields=_MP_SUMMARY_FIELDS_PAGE2, limit=limit)
+                    logging.info('page2_search_mp chemsys=%s -> %d', _build_chemsys_from_element(q), len(docs))
+                except Exception as exc:
+                    logging.warning('page2_search_mp chemsys search failed: %s', exc)
+
+            if not docs and '-' not in q:
                 try:
                     docs = list(mpr.materials.summary.search(elements=[q_cap], **kwargs))
                 except (TypeError, AttributeError, ValueError):
                     pass
 
-            if not docs and len(q_cap) <= 3:
+            if not docs and '-' not in q and len(q_cap) <= 3:
                 try:
                     docs = list(mpr.materials.summary.search(formula=q_cap, **kwargs))
                 except (TypeError, AttributeError):
@@ -2002,10 +2044,19 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
                         a = round(doc.structure.lattice.a, 5)
                         b = round(doc.structure.lattice.b, 5)
                         c = round(doc.structure.lattice.c, 5)
+                    elems = getattr(doc, "elements", None)
+                    elem_text = ''
+                    if elems:
+                        try:
+                            elem_text = ' '.join(sorted(str(el) for el in elems))
+                        except Exception:
+                            elem_text = str(elems)
                     results.append(_to_json_serializable({
                         "id": "mp-{}".format(mid) if mid and not str(mid).startswith("mp-") else mid,
                         "material_name": formula,
                         "source": "Materials Project",
+                        "元素": elem_text,
+                        "elements": elems,
                         "晶体结构": crystal,
                         "data_source": "Materials Project (id={})".format(mid) if mid else "Materials Project",
                         "a": a, "b": b, "c": c,

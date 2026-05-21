@@ -39,7 +39,8 @@
     "data": {
       "最后一次测试": "last"
     },
-    "status": "pending",
-    "created_at": "2026-05-18 17:12:48"
+    "status": "rejected",
+    "created_at": "2026-05-18 17:12:48",
+    "reviewed_at": "2026-05-21 12:48:56"
   }
 ]
