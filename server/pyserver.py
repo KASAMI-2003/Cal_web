@@ -2253,8 +2253,27 @@ def create_stiffness_tensor(C11, C12, C44, C13, matrix_type):
 def run_http_server():
     try:
         Handler = MyRequestHandler
-        port = find_available_port(3569)
+        try:
+            preferred = int(os.environ.get('PY_HTTP_PORT', '3569'))
+        except (TypeError, ValueError):
+            preferred = 3569
+
+        port = preferred
+        if is_port_in_use(preferred):
+            logging.error(
+                'HTTP 端口 %s 已被占用（Nginx 反代将 502）。等待释放…',
+                preferred,
+            )
+            for attempt in range(10):
+                time.sleep(1)
+                if not is_port_in_use(preferred):
+                    break
+            else:
+                logging.error('HTTP 端口 %s 仍被占用，HTTP 服务未启动', preferred)
+                return
+
         with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
+            logging.info('HTTP 服务器监听 0.0.0.0:%s', port)
             print(f"HTTP服务器运行在端口 {port},http://localhost:{port}")
             print("Starting HTTP server...")
             httpd.serve_forever()
