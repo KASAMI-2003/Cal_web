@@ -1,5 +1,12 @@
 # TSX 前端 + Python API（独立目录）
 
+> **⚠ 已知问题（2026-05，待后续处理）**  
+> **生产服务器**（`calweb.physedu.top` / 阿里云）访问 **Materials Project API 已被封禁**（HTTP 403，公网 IP 被 MP 标记为 abusive traffic）。  
+> - **线上**：元素检索只能看到 **本地 MySQL**（`element_inf`、`u_nb_database`），**不会有 `mp-xxxxx` 结果**。  
+> - **本地 Windows 开发环境**：MP-API 仍可用。  
+> - **解封步骤**：`curl -s ifconfig.me` 查公网 IP → 发邮件至 **support@materialsproject.org** 说明用途并申请解封 → 在 systemd 配置 **`MP_API_KEY`**（勿用仓库默认 key）→ 重启 `calweb-backend`。  
+> - 详细说明见 **[deploy/MP-API-NOTICE.md](deploy/MP-API-NOTICE.md)**；前端全站顶栏有临时提示，解封后改 `web/src/config/opsNotice.ts` 关闭。
+
 本目录是从 `WEB_FILE/主页面` 拆出的**可单独拷贝/部署**的一套工程：
 
 | 子目录 | 说明 |
@@ -130,6 +137,8 @@ VITE_RUST_API_ORIGIN=https://calweb.physedu.top
 - **`/api/ssh/ws`** → 终端 WebSocket 端口（默认 `8765`）
 
 ### 3. 后端常驻（systemd 示例）
+
+> **MP-API**：若线上 MP 检索 403，见 **[deploy/MP-API-NOTICE.md](deploy/MP-API-NOTICE.md)**（当前生产 IP 待 MP 解封）。
 
 只保留 **一个** `pyserver` 进程；若手动 `python pyserver.py` 与 systemd 同时跑，会出现 `Address already in use`，HTTP 起不来只剩 WebSocket。
 

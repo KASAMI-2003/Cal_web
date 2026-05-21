@@ -10,6 +10,7 @@ import { DataFittingPage } from './pages/DataFittingPage';
 import { VisualizationPage } from './pages/VisualizationPage';
 import { DigitalTwinPage } from './pages/DigitalTwinPage';
 import { getAuthState } from './auth/authStore';
+import { MP_API_BLOCKED_NOTICE_TEXT, SHOW_MP_API_BLOCKED_NOTICE } from './config/opsNotice';
 
 const publicRoutes = new Set(['/login', '/register', '/']);
 
@@ -98,10 +99,22 @@ function TopNav() {
   );
 }
 
+function SiteOpsNotice() {
+  if (!SHOW_MP_API_BLOCKED_NOTICE) {
+    return null;
+  }
+  return (
+    <div className="site-ops-notice" role="status">
+      {MP_API_BLOCKED_NOTICE_TEXT}
+    </div>
+  );
+}
+
 export function App() {
   return (
-    <div className="app-shell">
+    <div className={`app-shell${SHOW_MP_API_BLOCKED_NOTICE ? ' app-shell--ops-notice' : ''}`}>
       <TopNav />
+      <SiteOpsNotice />
       <main className="app-main">
         <Routes>
           <Route path="/" element={<HomePage />} />
