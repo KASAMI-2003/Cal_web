@@ -6,7 +6,10 @@ import type {
   RustUserUpdateRequest,
 } from '../types/contracts';
 
-const rustBaseUrl = import.meta.env.VITE_RUST_API_ORIGIN ?? 'http://127.0.0.1:8088';
+// 开发：直连本机 Rust；生产：默认走当前站点（Nginx 反代 /login 等到 8088）
+const rustBaseUrl =
+  import.meta.env.VITE_RUST_API_ORIGIN ??
+  (import.meta.env.DEV ? 'http://127.0.0.1:8088' : undefined);
 
 export const rustApi = {
   login: (body: RustAuthRequest) =>
