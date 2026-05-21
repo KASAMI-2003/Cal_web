@@ -378,12 +378,14 @@ async def handle_terminal(websocket):
             except Exception:
                 pass
 
-def is_port_in_use(port):
+def is_port_in_use(port, host='0.0.0.0'):
+    """检测端口是否已有进程在 listen（忽略 TIME_WAIT）。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(('localhost', port))
+            s.bind((host, port))
             return False
-        except socket.error:
+        except OSError:
             return True
 
 def find_available_port(start_port):
@@ -2259,26 +2261,26 @@ def run_http_server():
     try:
         Handler = MyRequestHandler
         try:
-            preferred = int(os.environ.get('PY_HTTP_PORT', '3569'))
+            port = int(os.environ.get('PY_HTTP_PORT', '3569'))
         except (TypeError, ValueError):
-            preferred = 3569
+            port = 3569
 
-        port = preferred
-        if is_port_in_use(preferred):
-            logging.warning('HTTP 端口 %s 被占用，等待释放…', preferred)
-            for _ in range(15):
+        httpd = None
+        for attempt in range(30):
+            try:
+                httpd = ReuseAddrTCPServer(("0.0.0.0", port), Handler)
+                break
+            except OSError as e:
+                if attempt >= 29:
+                    logging.error('HTTP 端口 %s 无法绑定: %s', port, e)
+                    return
+                logging.warning('HTTP 端口 %s 绑定失败，1 秒后重试 (%s)', port, e)
                 time.sleep(1)
-                if not is_port_in_use(preferred):
-                    break
-            else:
-                logging.error('HTTP 端口 %s 仍被占用，HTTP 服务未启动', preferred)
-                return
 
-        with ReuseAddrTCPServer(("0.0.0.0", port), Handler) as httpd:
-            logging.info('HTTP 服务器监听 0.0.0.0:%s', port)
-            print(f"HTTP服务器运行在端口 {port},http://localhost:{port}")
-            print("Starting HTTP server...")
-            httpd.serve_forever()
+        logging.info('HTTP 服务器监听 0.0.0.0:%s', port)
+        print(f"HTTP服务器运行在端口 {port},http://localhost:{port}")
+        print("Starting HTTP server...")
+        httpd.serve_forever()
     except Exception as e:
         logging.error(f"HTTP服务器启动错误: {str(e)}")
 
