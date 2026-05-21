@@ -566,6 +566,10 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed.path
         return path.rstrip('/')
 
+    def do_HEAD(self):
+        """支持 HEAD 请求（Nginx、浏览器预检、健康检查等常用）"""
+        self.do_GET()
+
     def do_GET(self):
         if self.path == '/websocket_port':
             self.send_response(200)
