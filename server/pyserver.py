@@ -601,12 +601,23 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             )
         elif path == '/api/data':
             try:
-                # 使用全局变量element和num_element
                 global element, num_element
-                logging.info(f"Getting data for element: {element}, num_element: {num_element}")
+                parsed = urlparse(self.path)
+                qs = parse_qs(parsed.query)
+                query_element = (qs.get('element') or [None])[0]
+                query_num = (qs.get('num_element') or [None])[0]
+                req_element = (query_element or element or '').strip()
+                try:
+                    req_num_element = int(query_num) if query_num is not None else int(num_element)
+                except (TypeError, ValueError):
+                    req_num_element = num_element
+                logging.info(
+                    "Getting data for element: %s, num_element: %s (query=%s, global=%s)",
+                    req_element, req_num_element, query_element, element,
+                )
 
-                imf_list = get_data(element, num_element)
-                imf_list.append(f'当前查询: {element} (元素数量: {num_element})')
+                imf_list = get_data(req_element, req_num_element)
+                imf_list.append(f'当前查询: {req_element} (元素数量: {req_num_element})')
 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -1248,15 +1259,22 @@ _MP_SUMMARY_FIELDS_PAGE2 = [
 ]
 
 
+def _mp_summary_search_kwargs(fields, max_results=None, chunk_size=500):
+    """mp_api 新版用 num_chunks，不再支持 limit 参数。"""
+    kwargs = {'fields': fields, 'chunk_size': min(chunk_size, 1000)}
+    if max_results is not None:
+        capped = max(1, int(max_results))
+        kwargs['chunk_size'] = min(kwargs['chunk_size'], capped)
+        kwargs['num_chunks'] = max(1, (capped + kwargs['chunk_size'] - 1) // kwargs['chunk_size'])
+    return kwargs
+
+
 def _mp_search_by_element(mpr, element, fields, limit=None):
     """统一 MP 检索：materials.summary.search(chemsys=[...])。"""
     chemsys = _build_chemsys_from_element(element)
     if not chemsys:
         return []
-    kwargs = {'chemsys': [chemsys], 'fields': fields}
-    if limit is not None:
-        kwargs['chunk_size'] = max(500, limit)
-        kwargs['limit'] = limit
+    kwargs = {'chemsys': [chemsys], **_mp_summary_search_kwargs(fields, max_results=limit)}
     docs = mpr.materials.summary.search(**kwargs)
     return list(docs) if docs is not None else []
 
@@ -1272,7 +1290,7 @@ def get_data(element, num_element):
 
             try:
                 logging.info("正在查询 Materials Project API...")
-                docs = _mp_search_by_element(mpr, element, fields=_MP_SUMMARY_FIELDS_FULL, limit=None)
+                docs = _mp_search_by_element(mpr, element, fields=_MP_SUMMARY_FIELDS_FULL, limit=200)
                 logging.info(f"API查询完成，获取到 {len(docs)} 条记录")
             except Exception as api_error:
                 logging.error(f"MP-API请求失败: {str(api_error)}")
@@ -2002,15 +2020,15 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
             crystal_map = {"fcc": "cubic", "bcc": "cubic", "立方": "cubic", "六方": "hexagonal", "四方": "tetragonal", "正交": "orthorhombic", "单斜": "monoclinic"}
             crystal_system = crystal_map.get(q_lower) or (q_lower if q_lower in ("cubic", "hexagonal", "tetragonal", "orthorhombic", "monoclinic", "trigonal", "triclinic") else None)
 
-            kwargs = {"chunk_size": 500, "limit": limit, "fields": _MP_SUMMARY_FIELDS_PAGE2}
+            search_kwargs = _mp_summary_search_kwargs(_MP_SUMMARY_FIELDS_PAGE2, max_results=limit)
             docs = []
 
             if crystal_system and (search_in == "property" or search_in == "all"):
                 try:
-                    docs = list(mpr.materials.summary.search(symmetry__crystal_system=crystal_system, **kwargs))
+                    docs = list(mpr.materials.summary.search(symmetry__crystal_system=crystal_system, **search_kwargs))
                 except (TypeError, AttributeError):
                     try:
-                        docs = list(mpr.materials.summary.search(crystal_system=crystal_system, **kwargs))
+                        docs = list(mpr.materials.summary.search(crystal_system=crystal_system, **search_kwargs))
                     except (TypeError, AttributeError):
                         pass
 
@@ -2023,14 +2041,14 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
 
             if not docs and '-' not in q:
                 try:
-                    docs = list(mpr.materials.summary.search(elements=[q_cap], **kwargs))
+                    docs = list(mpr.materials.summary.search(formula=q_cap, **search_kwargs))
                 except (TypeError, AttributeError, ValueError):
                     pass
 
-            if not docs and '-' not in q and len(q_cap) <= 3:
+            if not docs and '-' not in q:
                 try:
-                    docs = list(mpr.materials.summary.search(formula=q_cap, **kwargs))
-                except (TypeError, AttributeError):
+                    docs = list(mpr.materials.summary.search(elements=[q_cap], **search_kwargs))
+                except (TypeError, AttributeError, ValueError):
                     pass
 
             for doc in docs[:limit]:
@@ -2045,18 +2063,22 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
                         b = round(doc.structure.lattice.b, 5)
                         c = round(doc.structure.lattice.c, 5)
                     elems = getattr(doc, "elements", None)
+                    elem_list = []
                     elem_text = ''
                     if elems:
                         try:
-                            elem_text = ' '.join(sorted(str(el) for el in elems))
+                            elem_list = sorted(str(el) for el in elems)
+                            elem_text = ' '.join(elem_list)
                         except Exception:
                             elem_text = str(elems)
+                            elem_list = [s for s in elem_text.split() if s]
                     results.append(_to_json_serializable({
                         "id": "mp-{}".format(mid) if mid and not str(mid).startswith("mp-") else mid,
                         "material_name": formula,
                         "source": "Materials Project",
+                        "化学式": formula,
                         "元素": elem_text,
-                        "elements": elems,
+                        "elements": elem_list,
                         "晶体结构": crystal,
                         "data_source": "Materials Project (id={})".format(mid) if mid else "Materials Project",
                         "a": a, "b": b, "c": c,

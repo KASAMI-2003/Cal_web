@@ -1782,7 +1782,7 @@ export function VisualizationPage() {
       let mpOptions: MaterialOption[] = [];
       try {
         await pythonApi.submitElement({ element: elementFormula, num_element: droppedSymbols.length || 1 });
-        const mpRaw = await pythonApi.queryData();
+        const mpRaw = await pythonApi.queryData(elementFormula, droppedSymbols.length || 1);
         const mpLines = mpRaw.message ?? [];
         const mpError = mpLines.find(
           (line) =>

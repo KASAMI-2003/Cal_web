@@ -11,6 +11,10 @@ curl -sf "http://127.0.0.1:3569/websocket_port" | head -c 120 && echo
 curl -sf -X POST "http://127.0.0.1:3569/mysql_receive" \
   -H 'Content-Type: application/json' \
   -d '{"element":"2U-Nb","text":"晶体结构"}' | head -c 200 && echo
+curl -sf -X POST "http://127.0.0.1:3569/page2_search" \
+  -H 'Content-Type: application/json' \
+  -d '{"q":"Fe","fuzzy":true,"search_in":"name"}' | python3 -c "import sys,json; d=json.load(sys.stdin); mp=[m for m in d.get('materials',[]) if m.get('source')=='Materials Project']; print('page2 Fe MP:', len(mp))" 2>/dev/null || echo "page2 Fe MP: (需要 python3 解析)"
+curl -sf "http://127.0.0.1:3569/api/data?element=Fe&num_element=1" | python3 -c "import sys,json; m=json.load(sys.stdin).get('message',[]); mp=sum(1 for x in m if str(x).startswith('Material ID:')); print('get_data Fe MP:', mp)" 2>/dev/null || echo "get_data Fe MP: (需要 python3 解析)"
 curl -sf -X POST "http://127.0.0.1:3569/api/data_fit" \
   -H 'Content-Type: application/json' \
   -d '{"x_data":[1,2,3],"y_data":[1,4,9],"fit_type":"Polynomial","degree":2}' | head -c 200 && echo

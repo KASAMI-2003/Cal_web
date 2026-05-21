@@ -25,7 +25,17 @@ export const pythonApi = {
       body,
       baseUrl: pythonBaseUrl,
     }),
-  queryData: () => requestJson<ApiDataResponse>('/api/data', { baseUrl: pythonBaseUrl }),
+  queryData: (element?: string, numElement?: number) => {
+    const params = new URLSearchParams();
+    if (element) {
+      params.set('element', element);
+    }
+    if (numElement !== undefined) {
+      params.set('num_element', String(numElement));
+    }
+    const query = params.toString();
+    return requestJson<ApiDataResponse>(query ? `/api/data?${query}` : '/api/data', { baseUrl: pythonBaseUrl });
+  },
   mysqlReceive: (body: { element: string; text: string }) =>
     requestJson('/mysql_receive', { method: 'POST', body, baseUrl: pythonBaseUrl }),
   page2Search: (body: { q: string; fuzzy?: boolean; case_sensitive?: boolean; search_in?: string }) =>

@@ -114,7 +114,7 @@ export function HomePage() {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 3000);
       });
-      const data = await pythonApi.queryData();
+      const data = await pythonApi.queryData(parsed.element, parsed.num_element);
       setResultText(data.message.join('\n'));
     } catch (error) {
       setResultText(`操作失败: ${(error as Error).message}`);
@@ -126,9 +126,14 @@ export function HomePage() {
       setResultText('请先输入元素信息');
       return;
     }
+    const parsed = parseElementInput(inputThing);
+    if (!parsed) {
+      setResultText("输入格式不正确，请使用类似 '2U-Nb' 的格式");
+      return;
+    }
     setResultText('正在获取数据，请稍候...');
     try {
-      const data = await pythonApi.queryData();
+      const data = await pythonApi.queryData(parsed.element, parsed.num_element);
       setResultText(data.message.join('\n'));
     } catch (error) {
       setResultText(`获取数据失败: ${(error as Error).message}`);
