@@ -46,6 +46,29 @@ python3 pyserver.py
 
 `requirements.txt` 已覆盖 `pyserver.py` 及子模块所需包（`mp-api`、`mysql-connector-python`、`ase`、`matplotlib`、`Flask`、`pandas`、`scipy`、`paramiko`、`websockets` 等）。可选 Celery 示例见 `server/requirements-optional.txt`。环境变量说明见 `server/.env.example`。
 
+**数字孪生 HTEM（必装，否则无法生成各向异性 3D 曲面）**
+
+数字孪生页依赖 HTEM 半解析模型（SAM）与 Fedorov 各向异性计算，需将 **HTEM 源码** 放到 `server/digital_twin/HTEM-main/`（或通过环境变量 `HTEM_ROOT` 指向该目录）。**不是 pip 包**。
+
+一键安装**最小运行时**（约 1MB，含 `source/` + Si 示例 `Elasticity_cold+NVT_s4.dat`，不含 VASP 参考算例）：
+
+```powershell
+# Windows（在 tsx-web-app 根目录）
+.\scripts\setup_htem.ps1
+```
+
+```bash
+# Linux / macOS
+chmod +x scripts/setup_htem.sh
+./scripts/setup_htem.sh
+```
+
+脚本会优先从同级目录 `WEB_FILE/digital_twin/HTEM-main` 复制；也可手动指定路径：`./scripts/setup_htem.sh /path/to/HTEM-main`。
+
+安装后重启 `pyserver`。若 HTEM 仍不可用，后端会回退 NumPy 占位曲面（精度低于 SAM，仅作兜底）。
+
+也可在 `server/.env` 中设置 `HTEM_ROOT=/path/to/HTEM-main`。
+
 也可在 `tsx-web-app/` 根目录执行 `python server/pyserver.py`：`pyserver` 会切换到 `server/` 再启动，静态资源路径与 `cargo run` 均相对于该目录解析。
 
 - 注意控制台里打印的 **HTTP 端口**（常为 `3569` 附近，可能自动顺延）。
@@ -195,6 +218,8 @@ VITE_RUST_API_ORIGIN=https://calweb.physedu.top
 - **`/api/ssh/ws`** → 终端 WebSocket 端口（默认 `8765`）
 
 ### 3. 后端常驻（systemd 示例）
+
+> **数字孪生 HTEM**：部署后需执行 `./scripts/setup_htem.sh`（或把 `HTEM-main` 放到 `server/digital_twin/HTEM-main`），否则 `/api/digital_twin/anisotropy_surface` 只能走占位回退。详见上文「数字孪生 HTEM（必装）」。
 
 > **MP-API**：若线上 MP 检索 403，见 **[deploy/MP-API-NOTICE.md](deploy/MP-API-NOTICE.md)**（当前生产 IP 待 MP 解封）。
 

@@ -24,6 +24,9 @@ web/dist/
 # 论文 Word 提取临时文本
 docs/_thesis_extract*.txt
 
+# HTEM 示例中的 VASP 参考算例（体积大，Web/SAM 运行不需要）
+server/digital_twin/HTEM-main/example/**/reference/
+
 # OS / editor
 .DS_Store
 Thumbs.db
