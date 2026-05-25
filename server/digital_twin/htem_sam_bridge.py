@@ -245,6 +245,11 @@ def build_elasticity_at_tp(T_K: float, P_GPa: float):
     供各向异性曲面 / Christoffel 声速计算使用。
     """
     _ensure_htem_path()
+    from htem_loader import load_htem_submodule
+
+    load_htem_submodule(_HTEM_ROOT, 'parameter')
+    load_htem_submodule(_HTEM_ROOT, 'write_output')
+    load_htem_submodule(_HTEM_ROOT, 'elasticity')
     from source.elasticity import Elasticity
     from source.parameter import Basic_para
 

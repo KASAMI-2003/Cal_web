@@ -26,6 +26,8 @@ numpy>=1.24,<3
 scipy>=1.10,<2
 pandas>=2.0,<3
 matplotlib>=3.8,<4
+# HTEM source/anisotropy.py 可选依赖；SAM 已通过 htem_loader 绕过 __init__，一般不必装
+# imageio>=2.9,<3
 ase>=3.22,<4
 
 # --- SSH 终端与进度条 ---

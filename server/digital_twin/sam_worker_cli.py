@@ -14,6 +14,10 @@ from types import SimpleNamespace
 
 import numpy as np
 
+_BRIDGE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BRIDGE_DIR not in sys.path:
+    sys.path.insert(0, _BRIDGE_DIR)
+
 
 def _patch_sam_no_plot(SAM):
     SAM.plot_results = lambda *a, **k: None
@@ -60,6 +64,9 @@ def main() -> int:
     if htem_root not in sys.path:
         sys.path.insert(0, htem_root)
 
+    from htem_loader import preload_sam_modules
+
+    preload_sam_modules(htem_root)
     from source.elasticity import Elasticity
     from source.semi_analytic_model import SAM
 

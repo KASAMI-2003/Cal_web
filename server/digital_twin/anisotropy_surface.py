@@ -204,9 +204,6 @@ def _compute_anisotropy_htem(
     n_chi: int,
     alloy_row: dict | None = None,
 ):
-    _ensure_htem_path()
-    from source.anisotropy import Anisotropy
-
     if alloy_row is not None:
         rho = float(alloy_row.get("rho") or 6.5)
         Eobj = _elasticity_from_alloy_cij(
@@ -220,10 +217,9 @@ def _compute_anisotropy_htem(
     else:
         Eobj = build_elasticity_at_tp(T_K, P_GPa)
     S_fedorov = Eobj.S_matrix_Fedorov
-    ano = Anisotropy()
 
-    phi_e, theta_e, M_e = _youngs_E_surface(S_fedorov, n_phi, n_theta, ano)
-    phi_n, theta_n, M_n = _poisson_nu_max_surface(S_fedorov, n_phi, n_theta, n_chi, ano)
+    phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
+    phi_n, theta_n, M_n = _poisson_nu_max_surface_numpy(S_fedorov, n_phi, n_theta, n_chi)
     phi_v, theta_v, M_v = _sound_vl_surface(Eobj.C_matrix, Eobj.rho, n_phi, n_theta)
 
     return {
@@ -247,24 +243,8 @@ def _elasticity_from_alloy_cij(
     T_K: float,
     P_GPa: float,
 ):
-    """由立方 c11/c12/c44 与密度构造 Elasticity（与 HTEM 立方 C 阶一致），用于成分表驱动。"""
-    _ensure_htem_path()
-    from source.elasticity import Elasticity
-
-    V_nom = 20.0
-    row = np.array(
-        [float(T_K), V_nom, float(P_GPa), float(rho), float(c11), float(c12), float(c44)],
-        dtype=float,
-    )
-    E = Elasticity()
-    E.T = float(T_K)
-    E.P = float(P_GPa)
-    E.V = V_nom
-    E.rho = float(rho)
-    E.C_matrix = E.format_Cij("C", row)
-    E.S_matrix = np.linalg.inv(E.C_matrix)
-    E.init_Fedorov_matrix()
-    return E
+    """由立方 c11/c12/c44 与密度构造弹性对象（成分表驱动）；不依赖 HTEM anisotropy/imageio。"""
+    return _NumpyElasticity(c11, c12, c44, rho, T_K, P_GPa)
 
 
 def _pack_surface(phi, theta, M, unit: str, aniso_squared: bool = False):
