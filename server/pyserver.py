@@ -738,7 +738,10 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 from htem_sam_bridge import get_htem_status
 
-                payload = get_htem_status()
+                parsed = urlparse(self.path)
+                qs = parse_qs(parsed.query)
+                probe = (qs.get('probe') or qs.get('warm') or ['0'])[0] in ('1', 'true', 'yes')
+                payload = get_htem_status(probe=probe)
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json; charset=utf-8')
                 self.end_headers()

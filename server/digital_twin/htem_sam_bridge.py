@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import sys
 import tempfile
 import threading
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -52,6 +50,7 @@ _DEFAULT_EXAMPLE_ELASTICITY_T = (
 
 _lock = threading.Lock()
 _cache: dict | None = None
+_last_sam_error: str | None = None
 """会话内覆盖 HTEM 输入路径（上传的温压网格 .dat）；None 表示用环境变量或默认 Si 示例。"""
 _SESSION_ELASTICITY_DAT: str | None = None
 
@@ -86,7 +85,7 @@ def htem_available() -> bool:
     return bool(_HTEM_ROOT)
 
 
-def get_htem_status() -> dict:
+def get_htem_status(probe: bool = False) -> dict:
     """供 /api/digital_twin/htem_status 与部署自检：HTEM 路径、默认 dat、SAM 缓存是否就绪。"""
     dat = _active_elasticity_path()
     out = {
@@ -95,10 +94,21 @@ def get_htem_status() -> dict:
         'elasticity_dat': dat,
         'elasticity_dat_exists': bool(dat and os.path.isfile(dat)),
         'sam_cache_ready': _cache is not None,
+        'last_sam_error': _last_sam_error,
     }
     if _cache is not None:
         out['sam_T_range'] = [float(_cache['T_grid'][0]), float(_cache['T_grid'][-1])]
         out['sam_P_range'] = [float(_cache['P_grid'][0]), float(_cache['P_grid'][-1])]
+    if probe and _cache is None and htem_available():
+        try:
+            warm_sam_cache()
+            out['sam_cache_ready'] = _cache is not None
+            out['last_sam_error'] = _last_sam_error
+            if _cache is not None:
+                out['sam_T_range'] = [float(_cache['T_grid'][0]), float(_cache['T_grid'][-1])]
+                out['sam_P_range'] = [float(_cache['P_grid'][0]), float(_cache['P_grid'][-1])]
+        except Exception as e:
+            out['last_sam_error'] = str(e)
     return out
 
 
@@ -116,29 +126,6 @@ def _ensure_htem_path():
         )
     if _HTEM_ROOT not in sys.path:
         sys.path.insert(0, _HTEM_ROOT)
-
-
-def _patch_sam_no_plot(SAM):
-    """SAM.model_elasticity 内部会调 matplotlib 出图；Web/API 场景下禁用绘图。"""
-    SAM.plot_results = lambda *a, **k: None
-    SAM.plot_set_range = lambda *a, **k: None
-
-
-def _parse_elasticity_t_model_dat(path: str) -> np.ndarray:
-    """
-    解析 model_elasticity 写出的 figures/model/Elasticity_T_model.dat 中的网格表。
-    表头行含 T(K)、P(GPa)、V、Cij、B、G、E。
-    """
-    with open(path, encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
-    start = None
-    for i, line in enumerate(lines):
-        if 'The modeled elastic constants and moduli are as follows:' in line:
-            start = i + 2
-            break
-    if start is None:
-        raise ValueError('未找到 SAM 网格表头（The modeled elastic constants...）')
-    return np.loadtxt(lines[start:])
 
 
 def _build_interpolators(data: np.ndarray):
@@ -184,79 +171,72 @@ def _build_interpolators(data: np.ndarray):
 
 
 def _run_sam_once():
-    """在临时目录中运行 SAM.model_elasticity，返回解析后的网格数组。"""
-    import matplotlib
-
-    matplotlib.use('Agg')
-    _ensure_htem_path()
-    from source.elasticity import Elasticity
-    from source.semi_analytic_model import SAM
+    """在独立子进程中运行 SAM，避免 pyserver 多线程共享进程 cwd 导致 Linux 服务器上失败。"""
+    import subprocess
 
     src_dat = _active_elasticity_path()
     if not os.path.isfile(src_dat):
         raise FileNotFoundError(f'缺少 HTEM 输入: {src_dat}')
 
-    SAM_cls = SAM
-    _patch_sam_no_plot(SAM_cls)
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sam_worker_cli.py')
+    if not os.path.isfile(worker):
+        raise FileNotFoundError(f'缺少 SAM worker: {worker}')
 
-    cwd = os.getcwd()
-    tmp = tempfile.mkdtemp(prefix='htem_sam_')
+    out_npy = tempfile.mktemp(prefix='htem_sam_', suffix='.npy')
+    env = os.environ.copy()
+    env.setdefault('MPLBACKEND', 'Agg')
+    env.setdefault('MPLCONFIGDIR', '/tmp/matplotlib-calweb')
+
     try:
-        os.chdir(tmp)
-        shutil.copy(src_dat, 'Elasticity_T.dat')
-
-        t_ref = float(os.environ.get('HTEM_T_REF', '0'))
-        lattice = os.environ.get('HTEM_LATTICE', 'C').strip() or 'C'
-        m_avg = float(os.environ.get('HTEM_M', '28.085'))
-
-        args = SimpleNamespace(
-            lattice=lattice,
-            T_ref=t_ref,
-            T_range=[273.0, 1200.0, 24],
-            P_range=[0.0, 20.0, 20],
-            weight=2.0,
-            plt=None,
-            M=m_avg,
+        proc = subprocess.run(
+            [sys.executable, worker, _HTEM_ROOT, src_dat, out_npy],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
         )
-        with open('Elasticity_T.dat', encoding='utf-8', errors='ignore') as f:
-            n_lines = len(f.readlines()) - 2
-        C = {}
-        for i in range(n_lines):
-            C[i] = Elasticity()
-            C[i].read_output('Elasticity_T.dat', args, i)
-
-        sam = SAM_cls()
-        sam.model_elasticity(C, args, 'isothermal')
-
-        out = os.path.join('figures', 'model', 'Elasticity_T_model.dat')
-        if not os.path.isfile(out):
-            raise FileNotFoundError('SAM 未生成 figures/model/Elasticity_T_model.dat')
-        return _parse_elasticity_t_model_dat(out)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or '').strip()
+            raise RuntimeError(detail or f'SAM worker exit {proc.returncode}')
+        if not os.path.isfile(out_npy):
+            raise FileNotFoundError('SAM worker 未写出网格 npy')
+        data = np.load(out_npy)
+        if getattr(data, 'ndim', 0) != 2 or data.shape[1] < 9:
+            raise ValueError(f'SAM 网格形状异常: {getattr(data, "shape", None)}')
+        return data
     finally:
-        os.chdir(cwd)
-        shutil.rmtree(tmp, ignore_errors=True)
+        try:
+            os.remove(out_npy)
+        except OSError:
+            pass
 
 
 def get_sam_cache():
     """懒加载并缓存插值器；失败时抛出，由上层回退占位公式。"""
-    global _cache
+    global _cache, _last_sam_error
     if _cache is not None:
         return _cache
     with _lock:
         if _cache is not None:
             return _cache
-        data = _run_sam_once()
-        _cache = _build_interpolators(data)
-        logging.info(
-            'HTEM SAM 已初始化：网格 T=%s..%s (%d点), P=%s..%s (%d点)',
-            _cache['T_grid'][0],
-            _cache['T_grid'][-1],
-            len(_cache['T_grid']),
-            _cache['P_grid'][0],
-            _cache['P_grid'][-1],
-            len(_cache['P_grid']),
-        )
-        return _cache
+        try:
+            data = _run_sam_once()
+            _cache = _build_interpolators(data)
+            _last_sam_error = None
+            logging.info(
+                'HTEM SAM 已初始化：网格 T=%s..%s (%d点), P=%s..%s (%d点)',
+                _cache['T_grid'][0],
+                _cache['T_grid'][-1],
+                len(_cache['T_grid']),
+                _cache['P_grid'][0],
+                _cache['P_grid'][-1],
+                len(_cache['P_grid']),
+            )
+            return _cache
+        except Exception as e:
+            _last_sam_error = str(e)
+            logging.exception('HTEM SAM 初始化失败: %s', e)
+            raise
 
 
 def build_elasticity_at_tp(T_K: float, P_GPa: float):
