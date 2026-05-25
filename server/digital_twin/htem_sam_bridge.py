@@ -24,6 +24,20 @@ import threading
 
 import numpy as np
 
+
+def _as_scalar(value) -> float:
+    """RegularGridInterpolator 返回值在不同 scipy 版本下可能是标量、0-d 或 (1,) 数组。"""
+    arr = np.asarray(value)
+    if arr.size == 0:
+        raise ValueError('插值结果为空')
+    return float(arr.reshape(-1)[0])
+
+
+def _interp_tp(interp, t: float, p: float) -> float:
+    """在 (T, P) 单点插值，坐标形状 (1, 2) 以兼容各 scipy 版本。"""
+    pt = np.array([[float(t), float(p)]], dtype=float)
+    return _as_scalar(interp(pt))
+
 def _discover_htem_root() -> str | None:
     """优先 HTEM_ROOT 环境变量，其次与本文件同目录下的 HTEM-main，再次兼容旧布局（仓库根下 digital_twin/HTEM-main）。"""
     here = os.path.dirname(os.path.abspath(__file__))
@@ -152,9 +166,9 @@ def _build_interpolators(data: np.ndarray):
 
     interp_V = reshape_col(2)
     # 参考体积取 (300K, 0 GPa)，与前端滑块常用温度区间一致，便于解释 V/V₀
-    v0 = float(interp_V(np.array([300.0, 0.0])))
+    v0 = _interp_tp(interp_V, 300.0, 0.0)
     if v0 <= 0:
-        v0 = float(data[0, 2])
+        v0 = _as_scalar(data[0, 2])
     return {
         'T_grid': tu,
         'P_grid': pu,
@@ -256,11 +270,10 @@ def build_elasticity_at_tp(T_K: float, P_GPa: float):
     c = get_sam_cache()
     t = float(np.clip(T_K, 273.0, 2000.0))
     p = float(np.clip(P_GPa, 0.0, 50.0))
-    pt = np.array([t, p])
-    V = float(c['interp_V'](pt))
-    c11 = float(c['interp_C11'](pt))
-    c12 = float(c['interp_C12'](pt))
-    c44 = float(c['interp_C44'](pt))
+    V = _interp_tp(c['interp_V'], t, p)
+    c11 = _interp_tp(c['interp_C11'], t, p)
+    c12 = _interp_tp(c['interp_C12'], t, p)
+    c44 = _interp_tp(c['interp_C44'], t, p)
     m_avg = float(os.environ.get('HTEM_M', '28.085'))
     Na = Basic_para().Na
     rho = m_avg / (V * Na / 1e24)
@@ -284,12 +297,11 @@ def twin_properties_htem(T_K: float, P_GPa: float) -> dict:
     c = get_sam_cache()
     t = float(np.clip(T_K, 273.0, 2000.0))
     p = float(np.clip(P_GPa, 0.0, 50.0))
-    pt = np.array([t, p])
 
-    B = float(c['interp_B'](pt))
-    G = float(c['interp_G'](pt))
-    E = float(c['interp_E'](pt))
-    V = float(c['interp_V'](pt))
+    B = _interp_tp(c['interp_B'], t, p)
+    G = _interp_tp(c['interp_G'], t, p)
+    E = _interp_tp(c['interp_E'], t, p)
+    V = _interp_tp(c['interp_V'], t, p)
     v0 = c['V0_ref'] if c['V0_ref'] > 0 else 1.0
     volume_scale = V / v0
 
