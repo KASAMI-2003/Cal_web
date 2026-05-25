@@ -483,7 +483,16 @@ export function DigitalTwinPage() {
         signal: controller.signal,
       });
       window.clearTimeout(timeoutId);
-      if (!response.ok) throw new Error('获取曲面数据失败');
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errJson = await response.json();
+          detail = String(errJson?.error ?? '').trim();
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail || '获取曲面数据失败');
+      }
       const json = await response.json();
       if (!params?.silent) {
         if (requestSeq === surfaceRequestSeqRef.current) {

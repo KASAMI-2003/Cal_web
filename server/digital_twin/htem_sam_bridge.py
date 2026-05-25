@@ -35,6 +35,8 @@ def _discover_htem_root() -> str | None:
         candidates.append(env)
     candidates.append(os.path.join(here, 'HTEM-main'))
     candidates.append(os.path.normpath(os.path.join(here, '..', '..', 'digital_twin', 'HTEM-main')))
+    # 与 tsx-web-app 同级的 WEB_FILE/digital_twin/HTEM-main（本地开发常见布局）
+    candidates.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'digital_twin', 'HTEM-main')))
     for p in candidates:
         if p and os.path.isdir(p) and os.path.isdir(os.path.join(p, 'source')):
             return os.path.normpath(p)
@@ -77,6 +79,11 @@ def clear_htem_cache():
     """更换 Elasticity_T.dat 或环境变量 HTEM_ELASTICITY_T 后调用，或重启 pyserver。"""
     global _cache
     _cache = None
+
+
+def htem_available() -> bool:
+    """HTEM 源码目录是否已就绪（供各向异性曲面等模块决定是否走 SAM/HTEM 路径）。"""
+    return bool(_HTEM_ROOT)
 
 
 def _ensure_htem_path():
