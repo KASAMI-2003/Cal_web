@@ -18,6 +18,8 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,9 +27,30 @@ SERVER = ROOT / 'server'
 if str(SERVER) not in sys.path:
     sys.path.insert(0, str(SERVER))
 
-import requests  # noqa: E402
-
 from vasp_import.parser import merge_manual_cij, scan_work_dir  # noqa: E402
+
+
+def post_import_api(url: str, payload: dict, timeout: float = 60.0) -> dict:
+    """POST JSON 至 /api/vasp/import（仅用标准库，避免远程 python3.11 未装 requests）。"""
+    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={'Content-Type': 'application/json; charset=utf-8'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', errors='replace')
+        raise SystemExit(f'API HTTP {e.code}: {detail or e.reason}') from e
+    except urllib.error.URLError as e:
+        raise SystemExit(f'API 请求失败: {e.reason}') from e
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f'API 返回非 JSON: {raw[:500]}') from e
 
 
 def _float_or_none(v):
@@ -123,21 +146,27 @@ def main() -> int:
             extra_meta={k: payload[k] for k in ('functional', 'encut', 'k_mesh') if k in payload},
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get('success'):
+            print(
+                '\n[dry-run] Born/Mouhat 通过，但未写入审核队列。'
+                ' 请使用终端「提交审核」按钮或去掉 --dry-run 再执行。',
+                file=sys.stderr,
+            )
+        else:
+            print('\n[dry-run] 稳定性未通过，不会进入审核队列。', file=sys.stderr)
         return 0 if result.get('success') else 1
 
     url = args.api_url.rstrip('/') + '/api/vasp/import'
-    try:
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        body = resp.json()
-    except requests.RequestException as e:
-        print(f'API 请求失败: {e}', file=sys.stderr)
-        return 2
-
+    body = post_import_api(url, payload)
     print(json.dumps(body, ensure_ascii=False, indent=2))
     if body.get('auto_rejected'):
+        print('\n稳定性未通过，已自动退回，管理员端不会出现该申请。', file=sys.stderr)
         return 1
-    return 0 if body.get('success') else 1
+    if body.get('success') and body.get('id'):
+        print(f"\n已提交管理员审核，申请 ID: {body['id']}（管理员页 /admin 可见）", file=sys.stderr)
+        return 0
+    print('\n提交失败，未生成审核申请。', file=sys.stderr)
+    return 1
 
 
 if __name__ == '__main__':

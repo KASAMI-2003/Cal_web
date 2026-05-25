@@ -2485,16 +2485,16 @@ export function VisualizationPage() {
                           </div>
                           <div className="viz-terminal-import-actions row">
                             <button type="button" className="btn" onClick={() => runVaspImportPreset('scan_stress')}>
-                              应力-应变 · 扫描当前目录
+                              提交审核 · 应力-应变
                             </button>
                             <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('scan_energy')}>
-                              能量-应变 · 扫描当前目录
+                              提交审核 · 能量-应变
                             </button>
                             <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('from_json')}>
-                              读取 ./elastic_import.json
+                              提交审核 · elastic_import.json
                             </button>
                             <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('dry_run')}>
-                              仅检验（--dry-run）
+                              仅检验（--dry-run，不入队）
                             </button>
                           </div>
                         </div>

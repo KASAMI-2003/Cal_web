@@ -99,10 +99,22 @@ export function ProfilePage() {
                 approved: '已通过',
                 rejected: '已拒绝',
               };
+              const isVasp = app.source_type === 'vasp_import';
               return (
                 <div className="app-item" key={app.id}>
-                  <span>{app.created_at}</span>
-                  <span className={`app-status app-status-${app.status}`}>{statusMap[app.status] || app.status}</span>
+                  <span>
+                    {app.created_at}
+                    {isVasp ? ' · VASP' : ''}
+                    {app.id ? ` · ID ${app.id}` : ''}
+                  </span>
+                  <span className={`app-status app-status-${app.status}`}>
+                    {statusMap[app.status] || app.status}
+                  </span>
+                  {isVasp && app.stability ? (
+                    <span className="mono" style={{ fontSize: 12 }}>
+                      Born/Mouhat: {app.stability.passed ? '通过' : '未通过'}
+                    </span>
+                  ) : null}
                 </div>
               );
             })}

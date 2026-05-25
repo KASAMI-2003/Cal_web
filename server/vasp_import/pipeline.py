@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Callable
 
@@ -156,11 +157,12 @@ def submit_import_application(
     }
     apps.append(entry)
     save_apps()
+    logging.info('vasp import pending saved id=%s user=%s element=%s', app_id, username, result.get('element'))
     return {
         'success': True,
         'auto_rejected': False,
         'id': app_id,
         'stability': result.get('stability'),
         'db_data': result.get('db_data'),
-        'message': result.get('message'),
+        'message': f"稳定性检验通过，已提交管理员审核（申请 ID: {app_id}）",
     }
