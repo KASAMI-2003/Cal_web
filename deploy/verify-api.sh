@@ -20,6 +20,11 @@ curl -sf -X POST "http://127.0.0.1:3569/api/data_fit" \
   -d '{"x_data":[1,2,3],"y_data":[1,4,9],"fit_type":"Polynomial","degree":2}' | head -c 200 && echo
 
 echo ""
+echo "=== 数字孪生 HTEM / 曲面 ==="
+curl -sf "http://127.0.0.1:3569/api/digital_twin/htem_status" | python3 -c "import sys,json; d=json.load(sys.stdin); print('htem_available:', d.get('htem_available'), 'sam_cache:', d.get('sam_cache_ready'), 'dat:', d.get('elasticity_dat_exists'))" 2>/dev/null || echo "htem_status: (需要 python3)"
+curl -sf "http://127.0.0.1:3569/api/digital_twin/anisotropy_surface?T=300&P=0&n_phi=16&n_theta=24&n_chi=16" | python3 -c "import sys,json; d=json.load(sys.stdin); e=d.get('E',{}); print('surface model:', d.get('model'), 'E range:', e.get('min'), '~', e.get('max'))" 2>/dev/null || echo "anisotropy_surface: (需要 python3；正确应为 HTEM_SAM 且 E min≈112)"
+
+echo ""
 echo "=== 经 Nginx HTTPS ==="
 for path in \
   "POST ${BASE}/mysql_receive" \

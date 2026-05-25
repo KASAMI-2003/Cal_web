@@ -494,12 +494,17 @@ export function DigitalTwinPage() {
         throw new Error(detail || '获取曲面数据失败');
       }
       const json = await response.json();
-      if (!params?.silent) {
-        if (requestSeq === surfaceRequestSeqRef.current) {
-          setSurfaceData(json);
+      if (requestSeq === surfaceRequestSeqRef.current) {
+        setSurfaceData(json);
+        if (!params?.silent) {
+          const model = String(json?.model ?? '');
+          if (model === 'numpy_fallback_si') {
+            setStatus('警告：未启用 HTEM SAM，当前为占位曲面。请在服务器执行 git pull 并确认 server/digital_twin/HTEM-main 存在后重启 calweb-backend。');
+          } else {
+            setStatus(`已加载各向异性曲面${model ? ` (${model})` : ''}`);
+          }
         }
       }
-      if (!params?.silent) setStatus('已加载各向异性曲面数据');
       return json;
     } catch (error) {
       if (!params?.silent) {
@@ -610,7 +615,6 @@ export function DigitalTwinPage() {
     try {
       stopScanAnimation();
       setConfigSwitching(true);
-      surfaceRequestSeqRef.current += 1;
       setStatus(`正在切换配置并加载曲面: ${fileId || '默认 HTEM'} ...`);
       setSurfaceData(null);
       const response = await pythonApi.twinActivateDat({
@@ -645,7 +649,6 @@ export function DigitalTwinPage() {
     try {
       stopScanAnimation();
       setConfigSwitching(true);
-      surfaceRequestSeqRef.current += 1;
       setStatus('正在恢复默认 HTEM 并加载曲面...');
       setSurfaceData(null);
       const response = await pythonApi.twinActivateDat({
@@ -1363,7 +1366,7 @@ export function DigitalTwinPage() {
                     </div>
                     <div className="viz-window-body">
                       <div className="surf-canvas-wrap" ref={(el) => { canvasRefs.current[win.id] = el; }} />
-                      {!surfaceData ? (
+                      {!surfaceData && !surfaceLoading && !configSwitching ? (
                         <div
                           style={{
                             position: 'absolute',
@@ -1374,7 +1377,20 @@ export function DigitalTwinPage() {
                             pointerEvents: 'none',
                           }}
                         >
-                          {surfaceLoading || configSwitching ? '配置曲面加载中…' : '未获取到配置曲面数据'}
+                          未获取到配置曲面数据
+                        </div>
+                      ) : surfaceData?.model === 'numpy_fallback_si' ? (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 10,
+                            top: 8,
+                            fontSize: 12,
+                            color: '#f9ab00',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          占位曲面（未启用 HTEM SAM）
                         </div>
                       ) : null}
                       <div className="surf-color-legend">

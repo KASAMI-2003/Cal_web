@@ -25,6 +25,7 @@ Restart=on-failure
 RestartSec=5
 KillMode=mixed
 TimeoutStopSec=15
+# 首次启动后约 10–30s 会预热 HTEM SAM；日志中应出现「HTEM SAM 缓存已预热」
 
 [Install]
 WantedBy=multi-user.target

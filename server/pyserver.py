@@ -734,6 +734,21 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json; charset=utf-8')
             self.end_headers()
             self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        elif path == '/api/digital_twin/htem_status':
+            try:
+                from htem_sam_bridge import get_htem_status
+
+                payload = get_htem_status()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                logging.exception('digital_twin htem_status: %s', e)
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif path == '/api/digital_twin/anisotropy_surface':
             # 返回 E、nu_max、v_l 的球面参数化网格（与 HTEM anisotropy 一致），供 Three.js 绘制各向异性曲面
             parsed = urlparse(self.path)
@@ -2424,8 +2439,21 @@ def run_http_server():
     except Exception as e:
         logging.error(f"HTTP服务器启动错误: {str(e)}")
 
+def _warm_htem_sam_background():
+    try:
+        from htem_sam_bridge import htem_available, warm_sam_cache
+
+        if htem_available():
+            warm_sam_cache()
+            logging.info('HTEM SAM 缓存已预热（数字孪生曲面将使用 HTEM_SAM）')
+    except Exception as e:
+        logging.warning('HTEM SAM 预热失败，数字孪生可能回退 numpy 占位曲面: %s', e)
+
+
 if __name__ == "__main__":
     os.chdir(SERVER_ROOT)
+
+    threading.Thread(target=_warm_htem_sam_background, daemon=True).start()
 
     # 启动WebSocket服务器
     websocket_thread = threading.Thread(target=run_websocket_server, daemon=True)

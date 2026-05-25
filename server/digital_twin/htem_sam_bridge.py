@@ -86,6 +86,29 @@ def htem_available() -> bool:
     return bool(_HTEM_ROOT)
 
 
+def get_htem_status() -> dict:
+    """供 /api/digital_twin/htem_status 与部署自检：HTEM 路径、默认 dat、SAM 缓存是否就绪。"""
+    dat = _active_elasticity_path()
+    out = {
+        'htem_available': htem_available(),
+        'htem_root': _HTEM_ROOT or '',
+        'elasticity_dat': dat,
+        'elasticity_dat_exists': bool(dat and os.path.isfile(dat)),
+        'sam_cache_ready': _cache is not None,
+    }
+    if _cache is not None:
+        out['sam_T_range'] = [float(_cache['T_grid'][0]), float(_cache['T_grid'][-1])]
+        out['sam_P_range'] = [float(_cache['P_grid'][0]), float(_cache['P_grid'][-1])]
+    return out
+
+
+def warm_sam_cache():
+    """首次 SAM 拟合约 10–30s；启动时预热可避免首帧曲面走 numpy 占位回退。"""
+    if not htem_available():
+        raise RuntimeError('HTEM 未安装')
+    get_sam_cache()
+
+
 def _ensure_htem_path():
     if not _HTEM_ROOT:
         raise RuntimeError(
