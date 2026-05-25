@@ -1,0 +1,10 @@
+lattice = C
+sgn = 227
+natom = 64
+M = 28.085000000000022
+weight = 2.0
+T_ref = 0.0
+P_range = [0.0, 10.0, 11]
+T_range = [0.0, 1200.0, 121]
+read_file = Elasticity_cold+NVT_s4.dat
+plt = eps

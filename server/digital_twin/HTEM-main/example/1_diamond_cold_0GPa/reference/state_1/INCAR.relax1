@@ -1,0 +1,26 @@
+# INCAR for relax1
+# Global parameters
+SYSTEM = C8
+ISTART = 0
+ICHARG = 2
+LREAL = Auto
+PREC = Normal
+LWAVE = .False.
+LCHARG = .False.
+ADDGRID = .True.
+ENCUT = 520
+# Electronic parameters
+ISMEAR = 1
+SIGMA = 0.2
+NELM = 60
+NELMIN = 8
+# Ionic parameters
+EDIFF = 1e-06
+EDIFFG = -0.01
+NSW = 60
+IBRION = 2
+PSTRESS = 0.0
+ISIF = 3
+# other parameters
+KPAR = 8
+ALGO = Fast

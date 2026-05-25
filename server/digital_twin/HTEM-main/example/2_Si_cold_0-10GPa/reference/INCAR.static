@@ -1,0 +1,27 @@
+# INCAR for static
+# Global parameters
+SYSTEM = Si64
+ISTART = 0
+ICHARG = 2
+LREAL = Auto
+PREC = Accurate
+LWAVE = .False.
+LCHARG = .False.
+ADDGRID = .True.
+ENCUT = 400
+GGA = PS
+GGA_COMPAT = .FALSE.
+# Electronic parameters
+ISMEAR = -5
+NELM = 60
+NELMIN = 8
+# Ionic parameters
+EDIFF = 1e-06
+NSW = 0
+IBRION = -1
+ISIF = 2
+# other parameters
+KPAR = 4
+NPAR = 2
+ALGO = Fast
+AMIN = 0.0

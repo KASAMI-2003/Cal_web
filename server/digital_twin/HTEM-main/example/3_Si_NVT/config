@@ -1,0 +1,15 @@
+lattice = C
+sgn = 227
+M = 28.085000000000022
+mode = NVT
+encut = 400
+sigma = 0.1
+MLFF = False
+ksetting = [2, 2, 2]
+natom = 64
+nstrain = 4
+method = Stress
+inputfile = state.in
+nstate = 2
+maxstrain = 0.02
+forder = 2

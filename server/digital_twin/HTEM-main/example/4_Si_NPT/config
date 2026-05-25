@@ -1,0 +1,17 @@
+lattice = C
+sgn = 227
+M = 28.085000000000022
+mode = NPT
+encut = 400
+sigma = 0.2
+MLFF = False
+ksetting = [2, 2, 2]
+pressure = 8.0
+temperature = [600.0, 1200.0, 2]
+natom = 64
+nstrain = 4
+method = Stress
+inputfile = state.in
+nstate = 2
+forder = 2
+upmode = NPT

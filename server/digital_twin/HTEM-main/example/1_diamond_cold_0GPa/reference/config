@@ -1,0 +1,17 @@
+lattice = C
+sgn = 227
+natom = 8
+M = 12.010999999999997
+mode = cold
+encut = 400
+ksetting = 0.1
+sigma = 0.2
+pressure = 0.0
+temperature = 0.0
+inputfile = state.in
+nstate = 1
+nstrain = 8
+maxstrain = 0.02
+method = Stress
+upmode = CONTCAR
+forder = 2
