@@ -1,0 +1,15 @@
+ vasp.6.4.0  (minimal fixture for Born/Mouhat test — Mg hcp, stable)
+  energy  without entropy=    -1.60000000     -0.00000000
+
+ TOTAL ELASTIC MODULI (including ionic contributions) in kBar
+ ELASTIC TENSOR (kBar)
+     X         Y         Z          XY        YZ        ZX
+   597.0000   256.0000   218.0000     0.0000    0.0000    0.0000
+   256.0000   597.0000   218.0000     0.0000    0.0000    0.0000
+   218.0000   218.0000   615.0000     0.0000    0.0000    0.0000
+     0.0000     0.0000     0.0000   154.0000    0.0000    0.0000
+     0.0000     0.0000     0.0000     0.0000  154.0000    0.0000
+     0.0000     0.0000     0.0000     0.0000    0.0000  170.5000
+
+  Expected Cij (GPa): C11=59.7, C12=25.6, C13=21.8, C33=61.5, C44=15.4
+  Born/Mouhat (hex): C44>0, C11>|C12|, (C11+C12)C33>2C13², C33>0  →  PASS

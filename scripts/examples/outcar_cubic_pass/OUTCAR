@@ -1,0 +1,15 @@
+ vasp.6.4.0  (minimal fixture for Born/Mouhat test — Cu fcc, stable)
+  energy  without entropy=    -3.70000000     -0.00000000
+
+ TOTAL ELASTIC MODULI (including ionic contributions) in kBar
+ ELASTIC TENSOR (kBar)
+     X         Y         Z          XY        YZ        ZX
+  1621.2000  1308.8000  1308.8000     0.0000    0.0000    0.0000
+  1308.8000  1621.2000  1308.8000     0.0000    0.0000    0.0000
+  1308.8000  1308.8000  1621.2000     0.0000    0.0000    0.0000
+     0.0000     0.0000     0.0000   824.7000    0.0000    0.0000
+     0.0000     0.0000     0.0000     0.0000  824.7000    0.0000
+     0.0000     0.0000     0.0000     0.0000    0.0000  824.7000
+
+  Expected Cij (GPa): C11=162.12, C12=130.88, C44=82.47
+  Born/Mouhat (cubic): C11-C12>0, C11+2C12>0, C44>0  →  PASS

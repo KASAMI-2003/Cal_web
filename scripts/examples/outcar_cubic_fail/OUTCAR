@@ -1,0 +1,15 @@
+ vasp.6.4.0  (minimal fixture for Born/Mouhat test — mechanically unstable cubic)
+  energy  without entropy=    -4.10000000     -0.00000000
+
+ TOTAL ELASTIC MODULI (including ionic contributions) in kBar
+ ELASTIC TENSOR (kBar)
+     X         Y         Z          XY        YZ        ZX
+  1000.0000  1500.0000  1500.0000     0.0000    0.0000    0.0000
+  1500.0000  1000.0000  1500.0000     0.0000    0.0000    0.0000
+  1500.0000  1500.0000  1000.0000     0.0000    0.0000    0.0000
+     0.0000     0.0000     0.0000   500.0000    0.0000    0.0000
+     0.0000     0.0000     0.0000     0.0000  500.0000    0.0000
+     0.0000     0.0000     0.0000     0.0000    0.0000  500.0000
+
+  Expected Cij (GPa): C11=100, C12=150, C44=50
+  Born/Mouhat (cubic): C11-C12 = -50 < 0  →  FAIL
