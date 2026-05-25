@@ -2389,6 +2389,66 @@ body {
   background: #30363d;
 }
 
+.viz-terminal-import-toggle {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.viz-terminal-import-panel {
+  padding: 10px 12px;
+  border-bottom: 1px solid #30363d;
+  background: rgba(21, 101, 192, 0.12);
+}
+
+.viz-terminal-import-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.viz-terminal-import-fields {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.viz-terminal-import-script {
+  flex: 1 1 280px;
+}
+
+.viz-terminal-import-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.viz-terminal-import-actions .btn {
+  font-size: 12px;
+}
+
+.vasp-stability {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.vasp-stability.is-pass {
+  background: rgba(46, 125, 50, 0.15);
+  border: 1px solid rgba(46, 125, 50, 0.45);
+}
+
+.vasp-stability.is-fail {
+  background: rgba(198, 40, 40, 0.12);
+  border: 1px solid rgba(198, 40, 40, 0.45);
+}
+
+.vasp-stability ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .viz-terminal-console-body {
   flex: 1;
   min-height: 0;

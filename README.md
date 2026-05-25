@@ -20,12 +20,31 @@
 
 ### 1. 启动 Python API（终端 A）
 
-```bash
+在 `server/` 目录使用虚拟环境并安装依赖（**仅需执行一次**）：
+
+**Windows（PowerShell）：**
+
+```powershell
 cd server
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
 pip install -r requirements.txt
-# 按原项目习惯补全 mp_api、ase、mysql、flask 等依赖（与原 pyserver 一致）
 python pyserver.py
 ```
+
+**Linux / macOS：**
+
+```bash
+cd server
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+pip install -r requirements.txt
+python3 pyserver.py
+```
+
+`requirements.txt` 已覆盖 `pyserver.py` 及子模块所需包（`mp-api`、`mysql-connector-python`、`ase`、`matplotlib`、`Flask`、`pandas`、`scipy`、`paramiko`、`websockets` 等）。可选 Celery 示例见 `server/requirements-optional.txt`。环境变量说明见 `server/.env.example`。
 
 也可在 `tsx-web-app/` 根目录执行 `python server/pyserver.py`：`pyserver` 会切换到 `server/` 再启动，静态资源路径与 `cargo run` 均相对于该目录解析。
 
@@ -77,14 +96,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1
 
 ### Linux / macOS 说明
 
-- Python 侧建议使用 **`python3`**，并在 `server/` 下用虚拟环境安装依赖，例如：
-  ```bash
-  cd server
-  python3 -m venv .venv
-  source .venv/bin/activate   # Windows 用 .venv\Scripts\activate
-  pip install -r requirements.txt
-  python3 pyserver.py
-  ```
+- Python 侧建议使用 **`python3`** + **`server/.venv`**，依赖安装见上文「启动 Python API」一节（`pip install -r requirements.txt`）。
 - 私钥路径与 Windows 相同逻辑：默认读取 **`~/.ssh/id_ed25519`** 或 **`id_rsa`**（`expanduser` 在各平台为当前用户主目录）。
 - 若机器未安装 Rust / `cargo`，`pyserver` 会跳过 `database/` 子进程并打日志；不需要 Rust API 时可设置环境变量 **`TSX_SKIP_RUST_SERVER=1`** 主动跳过。
 - **`digital_twin_user_registry.json`** 中的 `disk_path` 应为相对 `server/` 的路径（仓库内已修正）；旧版若仍为 Windows 绝对路径，启动后会在能解析到文件时自动改写为相对路径。
@@ -97,6 +109,52 @@ powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1
 ### 4. 可视化页远程终端（SSH / WebSocket）
 
 终端在浏览器里连接的是 **`/api/ssh/ws`（相对当前页面，即 Vite 的 host:5173）**，再由 Vite 转到本机 Python 上的终端 WebSocket 端口（默认与环境变量 `TERMINAL_WS_PORT` 一致，多为 `8765`）。`VITE_PYTHON_API_ORIGIN` 只对应 **HTTP API**，不能用来连终端；若 Python 日志提示终端端口已从默认值改掉，请在启动 `npm run dev` 的环境里同步设置相同的 `TERMINAL_WS_PORT`。
+
+## VASP 弹性常数入库
+
+在 **OUTCAR 或汇总表所在目录** 执行 CLI，自动 Born/Mouhat 检验后提交管理员审核（`element_inf`）。
+
+```bash
+# 1. 准备汇总文件（任选其一放在当前目录）
+#    elastic_import.json | elastic_results.txt | summary.csv | OUTCAR(含 ELASTIC TENSOR)
+
+# 2. 提交（示例：Cu fcc 应力-应变法）
+python scripts/vasp_import.py \
+  --username admin \
+  --element Cu \
+  --structure fcc \
+  --method stress_strain \
+  --scan-dir .
+
+# 3. 仅本地检验、不提交 API
+python scripts/vasp_import.py ... --dry-run
+
+# 4. 命令行直接指定 Cij（GPa）
+python scripts/vasp_import.py --username admin --element Cu --structure fcc \
+  --method energy_strain --c11 175.96 --c12 124.75 --c44 78.36
+```
+
+- API：`POST /api/vasp/import`（与 CLI 相同 JSON 字段）
+- 可视化页 **终端 → VASP 入库** 可一键向已连接 SSH 终端插入上述命令
+- 示例汇总：`scripts/examples/elastic_import.json`
+- 稳定性未通过时 **自动退回**，不进入待审核队列
+
+**在服务器（SSH 远程）上使用终端按钮时：**
+
+1. 将 `scripts/vasp_import.py` 与 `server/vasp_import/` 部署到服务器（与 `pyserver.py` 同仓库），例如 `/opt/cal_web/Cal_web/`。
+2. 在可视化页「脚本路径」填 **远程绝对路径**：`/opt/cal_web/Cal_web/scripts/vasp_import.py`（勿用单引号包 `~`）。
+3. 在 `web/.env` 配置 **远程可访问的 API**（命令在 SSH 机执行，`localhost:5173` 无效）：
+   ```env
+   VITE_PYTHON_API_ORIGIN=http://127.0.0.1:3569
+   # 或与 Nginx 同域：
+   VITE_VASP_IMPORT_API_URL=https://calweb.physedu.top
+   ```
+   pyserver 与 SSH 在同一台云主机时，常用 `http://127.0.0.1:3569`。
+4. `cd` 到含 `elastic_import.json` 或 `OUTCAR` 的计算目录后再点按钮。
+
+本地浏览器 + 远程 SSH 联调时，若仍看到 API 为 `5173`，请创建 `web/.env` 并重启 `npm run dev`。
+
+---
 
 ## 生产部署（Nginx + systemd）
 

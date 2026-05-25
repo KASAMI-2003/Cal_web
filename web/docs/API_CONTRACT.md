@@ -12,6 +12,7 @@ This file freezes backend contracts used by the TSX migration.
 - `GET /data_input/pending?admin_user=admin` -> `{ success, data }`
 - `PUT /data_input/review` -> `{ success, message }`
 - `POST /data_input/submit` -> `{ success, message, id? }`
+- `POST /api/vasp/import` -> `{ success, auto_rejected?, id?, message, stability?, db_data? }`（Born/Mouhat 通过后进入待审核）
 - `POST /api/data_fit` -> `{ status, fit_func, r_squared, coeffs, x_fit, y_fit }` or `{ status: "error", message }`
 - `POST /api/terminal_reachable` -> `{ ok, reachable, ...detail }`
 - `GET /websocket_port` -> `{ port }`

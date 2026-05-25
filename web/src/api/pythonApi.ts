@@ -14,6 +14,8 @@ import type {
   TwinPropertyResponse,
   UploadDatRequest,
   UploadDatResponse,
+  VaspImportRequest,
+  VaspImportResponse,
 } from '../types/contracts';
 
 const pythonBaseUrl = import.meta.env.VITE_PYTHON_API_ORIGIN || undefined;
@@ -92,6 +94,12 @@ export const pythonApi = {
     }),
   createLatticePicture: (body: { lattice_const: string }) =>
     requestJson<{ points?: unknown[]; connections?: unknown[] }, { lattice_const: string }>('/create_lattice_picture', {
+      method: 'POST',
+      body,
+      baseUrl: pythonBaseUrl,
+    }),
+  vaspImport: (body: VaspImportRequest) =>
+    requestJson<VaspImportResponse, VaspImportRequest>('/api/vasp/import', {
       method: 'POST',
       body,
       baseUrl: pythonBaseUrl,

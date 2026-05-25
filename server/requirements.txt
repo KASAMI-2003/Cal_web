@@ -1,6 +1,33 @@
-paramiko>=2.12.0
-websockets>=12.0
-requests>=2.31.0
-numpy>=1.24.0
-scipy>=1.10.0
-python-docx>=0.8.11
+# Cal Web Python 后端（pyserver.py + digital_twin + data_fitting + automation/ssh）
+#
+# 一键安装（在 server/ 目录）：
+#   python -m venv .venv
+#   Windows:  .venv\Scripts\activate
+#   Linux:    source .venv/bin/activate
+#   pip install -U pip
+#   pip install -r requirements.txt
+#
+# 可选异步任务（async_compute_server.py，未接入主服务）：
+#   pip install -r requirements-optional.txt
+
+# --- HTTP / WebSocket ---
+Flask>=2.2,<4
+websockets>=12.0,<17
+requests>=2.31,<3
+
+# --- 材料数据库 API（检索 /api/data、page2_search_mp）---
+mp-api>=0.45,<0.46
+
+# --- MySQL（element_inf、materials；勿装废弃包 mysql-connector）---
+mysql-connector-python>=8.0,<10
+
+# --- 科学计算与可视化 ---
+numpy>=1.24,<3
+scipy>=1.10,<2
+pandas>=2.0,<3
+matplotlib>=3.8,<4
+ase>=3.22,<4
+
+# --- SSH 终端与进度条 ---
+paramiko>=3.0,<6
+tqdm>=4.66,<5

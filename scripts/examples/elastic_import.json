@@ -1,0 +1,14 @@
+{
+  "element": "Cu",
+  "structure": "fcc",
+  "method": "stress_strain",
+  "notes": "示例：应力-应变法，单位 GPa",
+  "cij": {
+    "C11": 162.12,
+    "C12": 130.88,
+    "C44": 82.47
+  },
+  "functional": "GGA-PBE",
+  "encut": "520",
+  "k_mesh": "0.03 A^-1"
+}

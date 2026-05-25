@@ -1,0 +1,4 @@
+# 可选依赖：仅在使用 server/automation/async_compute_server.py 时需要
+-r requirements.txt
+celery>=5.3,<6
+redis>=5.0,<7

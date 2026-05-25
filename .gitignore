@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+**/.venv*/
+server/.venv-test-deps/
 
 # Rust (server/database)
 server/database/target/
@@ -17,6 +20,9 @@ web/dist/
 
 # Logs
 *.log
+
+# 论文 Word 提取临时文本
+docs/_thesis_extract*.txt
 
 # OS / editor
 .DS_Store

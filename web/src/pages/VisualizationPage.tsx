@@ -430,6 +430,9 @@ function buildSearchCardSubtitle(option: MaterialOption): string {
 }
 
 const TERMINAL_SERVERS_KEY = 'viz_terminal_servers_v1';
+const VASP_SCRIPT_PATH_KEY = 'viz_vasp_import_script_v1';
+
+type VaspImportPreset = 'scan_stress' | 'scan_energy' | 'from_json' | 'dry_run';
 const DEFAULT_TERMINAL_SERVER: TerminalServerProfile = {
   id: 'default-local',
   name: '默认服务器',
@@ -558,6 +561,14 @@ export function VisualizationPage() {
   const [remoteEntries, setRemoteEntries] = useState<RemoteEntry[]>([]);
   const [selectedRemoteName, setSelectedRemoteName] = useState('');
   const [showServerConfig, setShowServerConfig] = useState(false);
+  const [showVaspImportPanel, setShowVaspImportPanel] = useState(false);
+  const [vaspImportElement, setVaspImportElement] = useState('Cu');
+  const [vaspImportStructure, setVaspImportStructure] = useState<'fcc' | 'bcc' | 'hcp'>('fcc');
+  const [vaspImportScriptPath, setVaspImportScriptPath] = useState(
+    () =>
+      localStorage.getItem(VASP_SCRIPT_PATH_KEY) ||
+      '/opt/cal_web/Cal_web/scripts/vasp_import.py',
+  );
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionTab[]>([
     {
       id: 'session-1',
@@ -735,6 +746,79 @@ export function VisualizationPage() {
         heightPx: Math.max(1, Math.round(shellRect?.height ?? 320)),
       }),
     );
+  }
+
+  /** SSH 远程 shell：~ 须用 $HOME 且勿用单引号包裹，否则无法展开 */
+  function shellScriptPath(path: string): string {
+    const p = path.trim();
+    if (p.startsWith('~/')) {
+      return `"$HOME/${p.slice(2).replace(/"/g, '\\"')}"`;
+    }
+    if (p.startsWith('~')) {
+      return `"${p.replace(/^~\/?/, '$HOME/').replace(/"/g, '\\"')}"`;
+    }
+    if (/[\s$'"\\]/.test(p)) {
+      return `"${p.replace(/"/g, '\\"')}"`;
+    }
+    return p;
+  }
+
+  function shellSingleQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+
+  function getCalwebApiUrlForTerminal(): string {
+    const vaspApi = (import.meta.env.VITE_VASP_IMPORT_API_URL as string | undefined)?.trim();
+    if (vaspApi) {
+      return vaspApi.replace(/\/$/, '');
+    }
+    const pyApi = (import.meta.env.VITE_PYTHON_API_ORIGIN as string | undefined)?.trim();
+    if (pyApi) {
+      return pyApi.replace(/\/$/, '');
+    }
+    if (import.meta.env.DEV) {
+      return 'http://127.0.0.1:3569';
+    }
+    return window.location.origin.replace(/\/$/, '');
+  }
+
+  function buildVaspImportShellCommand(preset: VaspImportPreset): string {
+    const api = getCalwebApiUrlForTerminal();
+    const user = auth.username || 'admin';
+    const script = shellScriptPath(vaspImportScriptPath);
+    const base = `python3 ${script} --api-url ${shellSingleQuote(api)} --username ${shellSingleQuote(user)} --element ${shellSingleQuote(vaspImportElement)} --structure ${shellSingleQuote(vaspImportStructure)}`;
+    switch (preset) {
+      case 'scan_stress':
+        return `${base} --method stress_strain --scan-dir .`;
+      case 'scan_energy':
+        return `${base} --method energy_strain --scan-dir .`;
+      case 'from_json':
+        return `${base} --method summary --json ./elastic_import.json`;
+      case 'dry_run':
+        return `${base} --method stress_strain --scan-dir . --dry-run`;
+      default:
+        return `${base} --method stress_strain --scan-dir .`;
+    }
+  }
+
+  function persistVaspImportScriptPath(path: string) {
+    setVaspImportScriptPath(path);
+    localStorage.setItem(VASP_SCRIPT_PATH_KEY, path);
+  }
+
+  function injectTerminalCommand(command: string) {
+    if (!canSend) {
+      setStatus('请先连接终端后再插入入库命令');
+      xtermRef.current?.writeln('\r\n\x1b[33m[提示] 请先点击连接终端\x1b[0m');
+      return;
+    }
+    wsSendTerminalPayload(wsRef.current ?? ws, `${command}\n`);
+    xtermRef.current?.focus();
+    xtermRef.current?.writeln(`\r\n\x1b[36m[已插入] ${command}\x1b[0m`);
+  }
+
+  function runVaspImportPreset(preset: VaspImportPreset) {
+    injectTerminalCommand(buildVaspImportShellCommand(preset));
   }
 
   function clearReconnectTimer() {
@@ -2332,10 +2416,70 @@ export function VisualizationPage() {
                       </div>
                       <div className="viz-terminal-console-subbar">
                         <span className="viz-terminal-console-cwd">终端 · {remoteCwd}</span>
+                        <button
+                          type="button"
+                          className="btn secondary viz-terminal-import-toggle"
+                          onClick={() => setShowVaspImportPanel((v) => !v)}
+                        >
+                          VASP 入库 ▾
+                        </button>
                         <button type="button" className="viz-terminal-console-close" onClick={disconnectTerminal}>
                           关闭
                         </button>
                       </div>
+                      {showVaspImportPanel ? (
+                        <div className="viz-terminal-import-panel">
+                          <p className="viz-terminal-import-hint">
+                            命令在 <strong>SSH 远程机</strong>上执行。脚本路径请填远程绝对路径（默认
+                            /opt/cal_web/Cal_web/scripts/vasp_import.py）；API 须远程能访问（在 web/.env 设
+                            VITE_VASP_IMPORT_API_URL，例如 https://域名 或 http://127.0.0.1:3569，勿用 Vite
+                            5173）。当前 API：{getCalwebApiUrlForTerminal()}
+                          </p>
+                          <div className="viz-terminal-import-fields row">
+                            <label className="field">
+                              元素
+                              <input
+                                value={vaspImportElement}
+                                onChange={(e) => setVaspImportElement(e.target.value.trim())}
+                                placeholder="Cu"
+                              />
+                            </label>
+                            <label className="field">
+                              结构
+                              <select
+                                value={vaspImportStructure}
+                                onChange={(e) => setVaspImportStructure(e.target.value as 'fcc' | 'bcc' | 'hcp')}
+                              >
+                                <option value="fcc">fcc</option>
+                                <option value="bcc">bcc</option>
+                                <option value="hcp">hcp</option>
+                              </select>
+                            </label>
+                            <label className="field viz-terminal-import-script">
+                              脚本路径
+                              <input
+                                value={vaspImportScriptPath}
+                                onChange={(e) => persistVaspImportScriptPath(e.target.value)}
+                                placeholder="/opt/cal_web/Cal_web/scripts/vasp_import.py"
+                              />
+                            </label>
+                          </div>
+                          <div className="viz-terminal-import-actions row">
+                            <button type="button" className="btn" onClick={() => runVaspImportPreset('scan_stress')}>
+                              应力-应变 · 扫描当前目录
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('scan_energy')}>
+                              能量-应变 · 扫描当前目录
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('from_json')}>
+                              读取 ./elastic_import.json
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => runVaspImportPreset('dry_run')}>
+                              仅检验（--dry-run）
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="viz-terminal-console-body">
                         <div
                           className="terminal-shell terminal-shell-live viz-terminal-xterm-host"

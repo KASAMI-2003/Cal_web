@@ -109,6 +109,65 @@ def _save_data_input_applications():
     except Exception as e:
         logging.warning("save data_input_applications: %s", e)
 
+
+def handle_vasp_import_request(data):
+    """POST /api/vasp/import：解析 Cij、Born/Mouhat 检验、写入待审核队列。"""
+    from vasp_import.pipeline import build_import_result, submit_import_application
+
+    username = (data.get('username') or '').strip()
+    if not username:
+        return {'success': False, 'message': '请先登录（username）'}
+
+    cij = None
+    raw_cij = data.get('cij')
+    if isinstance(raw_cij, dict) and raw_cij:
+        cij = {k.upper(): float(v) for k, v in raw_cij.items() if v not in (None, '')}
+
+    overrides = {}
+    for key in ('c11', 'c12', 'c13', 'c33', 'c44', 'C11', 'C12', 'C13', 'C33', 'C44'):
+        if key in data and data[key] not in (None, ''):
+            overrides[key.upper() if key.startswith('C') else f'C{key[1:].upper()}'] = float(data[key])
+
+    if overrides:
+        cij = cij or {}
+        for k, v in overrides.items():
+            cij[k] = v
+
+    extra_meta = {
+        k: data.get(k)
+        for k in ('functional', 'encut', 'k_mesh', 'temperature_K', 'soc', 'work_dir', 'notes')
+        if k in data
+    }
+
+    try:
+        result = build_import_result(
+            element=(data.get('element') or data.get('元素') or '').strip(),
+            structure=(data.get('structure') or data.get('晶体结构') or '').strip(),
+            method=(data.get('method') or 'summary').strip(),
+            username=username,
+            cij=cij,
+            work_dir=(data.get('work_dir') or '').strip() or None,
+            scan_dir=(data.get('scan_dir') or data.get('scanDir') or '').strip() or None,
+            notes=(data.get('notes') or data.get('备注') or '').strip(),
+            extra_meta=extra_meta or None,
+        )
+    except ValueError as e:
+        return {'success': False, 'message': str(e)}
+    except Exception as e:
+        logging.exception('vasp import build: %s', e)
+        return {'success': False, 'message': str(e)}
+
+    global _data_input_applications
+    _load_data_input_applications()
+
+    def _load():
+        return _data_input_applications
+
+    def _save():
+        _save_data_input_applications()
+
+    return submit_import_application(result, load_apps=_load, save_apps=_save)
+
 def _find_private_key_path():
     """依次查找 id_ed25519、id_rsa。OpenSSH 新版私钥须用 OpenSSH 的 ssh；PuTTY plink 常不兼容。"""
     ssh_dir = os.path.expanduser('~/.ssh')
@@ -1042,6 +1101,14 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     response = {'status': 'error', 'message': str(e)}
                     self.wfile.write(json.dumps(response).encode('utf-8'))
+
+            elif path == '/api/vasp/import':
+                body = handle_vasp_import_request(data)
+                status = 200 if body.get('success') or body.get('auto_rejected') else 200
+                self.send_response(status)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(body, ensure_ascii=False).encode('utf-8'))
 
             elif path == '/api/ssh/ping':
                 ping_body = ssh_ping_handshake(data)
