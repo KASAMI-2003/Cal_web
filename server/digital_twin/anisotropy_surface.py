@@ -36,7 +36,7 @@ def _fedorov_nv(vector: np.ndarray) -> np.ndarray:
 
 
 def _cubic_C_matrix(c11: float, c12: float, c44: float) -> np.ndarray:
-    """立方 Voigt 刚度矩阵（与 HTEM Elasticity.format_Cij('C', ...) 一致）。"""
+    """立方 Voigt 刚度矩阵（与 HTEM format_Cij('C') + method.symmetry 对称化一致）。"""
     C = np.zeros((6, 6))
     C[0, 0] = c11
     C[0, 1] = c12
@@ -47,6 +47,10 @@ def _cubic_C_matrix(c11: float, c12: float, c44: float) -> np.ndarray:
     C[1, 2] = C[0, 1]
     C[4, 4] = C[3, 3]
     C[5, 5] = C[3, 3]
+    # HTEM method.py 在 format_Cij 后会镜像下三角，Fedorov/Christoffel 均依赖对称 C
+    C[1, 0] = C[0, 1]
+    C[2, 0] = C[0, 2]
+    C[2, 1] = C[1, 2]
     return C
 
 
