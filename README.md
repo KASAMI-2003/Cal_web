@@ -166,14 +166,15 @@ python scripts/vasp_import.py --username admin --element Cu --structure fcc \
 
 1. 将 `scripts/vasp_import.py` 与 `server/vasp_import/` 部署到服务器（与 `pyserver.py` 同仓库），例如 `/opt/cal_web/Cal_web/`。
 2. 在可视化页「脚本路径」填 **远程绝对路径**：`/opt/cal_web/Cal_web/scripts/vasp_import.py`（勿用单引号包 `~`）。
-3. 在 `web/.env` 配置 **远程可访问的 API**（命令在 SSH 机执行，`localhost:5173` 无效）：
+3. 「Python 命令」默认 `python3.11`（系统 `python3` 若为 3.6 会报 `future feature annotations is not defined`）。可用 `python3.11 --version` 确认。
+4. 在 `web/.env` 配置 **远程可访问的 API**（命令在 SSH 机执行，`localhost:5173` 无效）：
    ```env
    VITE_PYTHON_API_ORIGIN=http://127.0.0.1:3569
    # 或与 Nginx 同域：
    VITE_VASP_IMPORT_API_URL=https://calweb.physedu.top
    ```
    pyserver 与 SSH 在同一台云主机时，常用 `http://127.0.0.1:3569`。
-4. `cd` 到含 `elastic_import.json` 或 `OUTCAR` 的计算目录后再点按钮。
+5. `cd` 到含 `elastic_import.json` 或 `OUTCAR` 的计算目录后再点按钮。
 
 本地浏览器 + 远程 SSH 联调时，若仍看到 API 为 `5173`，请创建 `web/.env` 并重启 `npm run dev`。
 

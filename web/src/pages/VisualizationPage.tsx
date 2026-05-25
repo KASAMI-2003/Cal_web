@@ -431,6 +431,7 @@ function buildSearchCardSubtitle(option: MaterialOption): string {
 
 const TERMINAL_SERVERS_KEY = 'viz_terminal_servers_v1';
 const VASP_SCRIPT_PATH_KEY = 'viz_vasp_import_script_v1';
+const VASP_PYTHON_BIN_KEY = 'viz_vasp_import_python_v1';
 
 type VaspImportPreset = 'scan_stress' | 'scan_energy' | 'from_json' | 'dry_run';
 const DEFAULT_TERMINAL_SERVER: TerminalServerProfile = {
@@ -568,6 +569,9 @@ export function VisualizationPage() {
     () =>
       localStorage.getItem(VASP_SCRIPT_PATH_KEY) ||
       '/opt/cal_web/Cal_web/scripts/vasp_import.py',
+  );
+  const [vaspImportPythonBin, setVaspImportPythonBin] = useState(
+    () => localStorage.getItem(VASP_PYTHON_BIN_KEY) || 'python3.11',
   );
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionTab[]>([
     {
@@ -786,7 +790,8 @@ export function VisualizationPage() {
     const api = getCalwebApiUrlForTerminal();
     const user = auth.username || 'admin';
     const script = shellScriptPath(vaspImportScriptPath);
-    const base = `python3 ${script} --api-url ${shellSingleQuote(api)} --username ${shellSingleQuote(user)} --element ${shellSingleQuote(vaspImportElement)} --structure ${shellSingleQuote(vaspImportStructure)}`;
+    const py = shellScriptPath(vaspImportPythonBin.trim() || 'python3.11');
+    const base = `${py} ${script} --api-url ${shellSingleQuote(api)} --username ${shellSingleQuote(user)} --element ${shellSingleQuote(vaspImportElement)} --structure ${shellSingleQuote(vaspImportStructure)}`;
     switch (preset) {
       case 'scan_stress':
         return `${base} --method stress_strain --scan-dir .`;
@@ -804,6 +809,11 @@ export function VisualizationPage() {
   function persistVaspImportScriptPath(path: string) {
     setVaspImportScriptPath(path);
     localStorage.setItem(VASP_SCRIPT_PATH_KEY, path);
+  }
+
+  function persistVaspImportPythonBin(bin: string) {
+    setVaspImportPythonBin(bin);
+    localStorage.setItem(VASP_PYTHON_BIN_KEY, bin);
   }
 
   function injectTerminalCommand(command: string) {
@@ -2431,9 +2441,10 @@ export function VisualizationPage() {
                         <div className="viz-terminal-import-panel">
                           <p className="viz-terminal-import-hint">
                             命令在 <strong>SSH 远程机</strong>上执行。脚本路径请填远程绝对路径（默认
-                            /opt/cal_web/Cal_web/scripts/vasp_import.py）；API 须远程能访问（在 web/.env 设
-                            VITE_VASP_IMPORT_API_URL，例如 https://域名 或 http://127.0.0.1:3569，勿用 Vite
-                            5173）。当前 API：{getCalwebApiUrlForTerminal()}
+                            /opt/cal_web/Cal_web/scripts/vasp_import.py）；Python 须 ≥3.9（CentOS 默认 python3 常为
+                            3.6，请填 python3.11）；API 须远程能访问（在 web/.env 设 VITE_VASP_IMPORT_API_URL，例如
+                            https://域名 或 http://127.0.0.1:3569，勿用 Vite 5173）。当前 API：
+                            {getCalwebApiUrlForTerminal()}
                           </p>
                           <div className="viz-terminal-import-fields row">
                             <label className="field">
@@ -2461,6 +2472,14 @@ export function VisualizationPage() {
                                 value={vaspImportScriptPath}
                                 onChange={(e) => persistVaspImportScriptPath(e.target.value)}
                                 placeholder="/opt/cal_web/Cal_web/scripts/vasp_import.py"
+                              />
+                            </label>
+                            <label className="field">
+                              Python 命令
+                              <input
+                                value={vaspImportPythonBin}
+                                onChange={(e) => persistVaspImportPythonBin(e.target.value.trim())}
+                                placeholder="python3.11"
                               />
                             </label>
                           </div>
