@@ -947,7 +947,8 @@ export function DigitalTwinPage() {
         disposeWindow(win.id);
       }
     });
-    rerenderVisibleWindows();
+    // 扫描时 surfaceData 每步都会变；须保留用户/OrbitControls 当前视角，避免每步跳回默认机位
+    rerenderVisibleWindows(undefined, { preserveView: scanRunningRef.current });
   }, [surfaceData, windowVisibilityKey, windowColor, showDirections, scanSpin]);
 
   useEffect(() => {
