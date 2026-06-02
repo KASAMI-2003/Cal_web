@@ -2173,8 +2173,24 @@ body {
   padding: 12px;
   display: grid;
   gap: 10px;
-  max-height: 320px;
+  max-height: 420px;
   overflow-y: auto;
+}
+
+.viz-terminal-server-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8b949e;
+}
+
+.viz-terminal-server-form-section {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #58a6ff;
 }
 
 .viz-terminal-sftp-meta {

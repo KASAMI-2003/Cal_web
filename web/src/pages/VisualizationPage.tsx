@@ -442,12 +442,16 @@ const VASP_PYTHON_BIN_KEY = 'viz_vasp_import_python_v1';
 type VaspImportPreset = 'scan_stress' | 'scan_energy' | 'from_json' | 'dry_run';
 const DEFAULT_TERMINAL_SERVER: TerminalServerProfile = {
   id: 'default-local',
-  name: '默认服务器',
-  host: '127.0.0.1',
+  name: '未配置（请添加）',
+  host: '',
   port: 22,
-  username: 'admin',
+  username: '',
   password: '',
 };
+
+function isTerminalServerReady(profile: Pick<TerminalServerProfile, 'host' | 'username' | 'password'>): boolean {
+  return Boolean(profile.host.trim() && profile.username.trim() && (profile.password ?? '').trim());
+}
 
 function readSavedTerminalServers(): TerminalServerProfile[] {
   try {
@@ -544,9 +548,9 @@ export function VisualizationPage() {
   const [materialPickerQuery, setMaterialPickerQuery] = useState('');
   const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
-  const [host, setHost] = useState('127.0.0.1');
+  const [host, setHost] = useState('');
   const [port, setPort] = useState(22);
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [terminalState, setTerminalState] = useState<TerminalState>('idle');
@@ -589,9 +593,9 @@ export function VisualizationPage() {
     {
       id: 'session-1',
       name: '终端 1',
-      host: '127.0.0.1',
+      host: '',
       port: 22,
-      username: 'admin',
+      username: '',
       password: '',
       output: '',
       cwd: '~',
@@ -995,7 +999,7 @@ export function VisualizationPage() {
     terminal.attachCustomKeyEventHandler(preventBrowserStealingTerminalKeys);
     terminal.open(terminalMountRef.current);
     fitAddon.fit();
-    terminal.writeln('终端已就绪，点击连接后可直接输入命令。');
+    terminal.writeln('终端已就绪。请先在左侧「添加服务器」填写远程 IP、SSH 用户名与密码，再连接。');
     terminal.onData((data) => {
       const currentWs = wsRef.current;
       if (currentWs && currentWs.readyState === WebSocket.OPEN && terminalAuthOkRef.current) {
@@ -1032,11 +1036,14 @@ export function VisualizationPage() {
   useEffect(() => {
     const prev = lastTabRef.current;
     if (activeTab === 'terminal' && prev !== 'terminal') {
+      if (!isTerminalServerReady(selectedServer)) {
+        setShowServerConfig(true);
+      }
       createTerminalNow();
       focusTerminalSoon();
     }
     lastTabRef.current = activeTab;
-  }, [activeTab]);
+  }, [activeTab, selectedServer]);
 
   useEffect(() => {
     if (!canSend || !ws) return;
@@ -1202,6 +1209,14 @@ export function VisualizationPage() {
       setStatus('终端通道正在连接中，请稍候…');
       return;
     }
+    if (!isTerminalServerReady({ host, username, password })) {
+      setShowServerConfig(true);
+      const hint =
+        '请先在左侧「添加服务器」或「编辑」中填写远程 IP、SSH 用户名，以及对方服务器提供的 SSH 登录密码。';
+      setStatus(hint);
+      xtermRef.current?.writeln(`\r\n\x1b[33m[提示] ${hint}\x1b[0m`);
+      return;
+    }
     try {
       manualDisconnectRef.current = false;
       clearReconnectTimer();
@@ -1261,8 +1276,9 @@ export function VisualizationPage() {
               xtermRef.current?.writeln(`\r\n\x1b[31m${msg.message || '连接失败'}\x1b[0m`);
               if (!password.trim()) {
                 xtermRef.current?.writeln(
-                  '\r\n\x1b[33m[提示] 请在终端配置中填写 SSH 密码，或在运行 pyserver 的用户（常为 root）的 ~/.ssh/ 配置 id_ed25519 并 authorized_keys 到目标账号。\x1b[0m',
+                  '\r\n\x1b[33m[提示] 请在左侧服务器配置中填写「SSH 登录密码」（远程服务器提供的账号密码），保存后再连接。\x1b[0m',
                 );
+                setShowServerConfig(true);
               }
               setTerminalState('error');
               setStatus(msg.message || '终端认证失败');
@@ -1464,7 +1480,23 @@ export function VisualizationPage() {
 
   function selectServerAndOpenTerminal(server: TerminalServerProfile) {
     setSelectedServerId(server.id);
+    if (!isTerminalServerReady(server)) {
+      setShowServerConfig(true);
+      setStatus('请填写该服务器的 IP、SSH 用户名与 SSH 密码后，再点击连接');
+      createTerminalSession(server, false);
+      return;
+    }
     createTerminalSession(server, true);
+  }
+
+  function openAddServerForm() {
+    setShowServerConfig(true);
+    setNewServerName('');
+    setNewServerHost('');
+    setNewServerPort(22);
+    setNewServerUsername('');
+    setNewServerPassword('');
+    setStatus('填写远程服务器 IP、SSH 用户名与 SSH 密码，然后点击「添加服务器」');
   }
 
   function removeTerminalSession(id: string) {
@@ -1699,7 +1731,11 @@ export function VisualizationPage() {
 
   function addServerProfile() {
     if (!newServerHost.trim() || !newServerUsername.trim()) {
-      setStatus('请填写服务器主机与用户名');
+      setStatus('请填写远程主机 IP 与 SSH 用户名');
+      return;
+    }
+    if (!newServerPassword.trim()) {
+      setStatus('请填写远程服务器提供的 SSH 登录密码');
       return;
     }
     const server: TerminalServerProfile = {
@@ -1712,15 +1748,28 @@ export function VisualizationPage() {
     };
     setServers((prev) => [...prev, server]);
     setSelectedServerId(server.id);
+    setHost(server.host);
+    setPort(server.port);
+    setUsername(server.username);
+    setPassword(server.password ?? '');
     setNewServerName('');
     setNewServerHost('');
     setNewServerPort(22);
     setNewServerUsername('');
     setNewServerPassword('');
+    setStatus(`已添加 ${server.name}，可点击左侧服务器卡片连接`);
   }
 
   function updateCurrentServerProfile() {
     if (!selectedServer) return;
+    if (!host.trim() || !username.trim()) {
+      setStatus('请填写远程主机 IP 与 SSH 用户名');
+      return;
+    }
+    if (!password.trim()) {
+      setStatus('请填写远程服务器提供的 SSH 登录密码');
+      return;
+    }
     setServers((prev) =>
       prev.map((item) =>
         item.id === selectedServer.id
@@ -1734,7 +1783,7 @@ export function VisualizationPage() {
           : item,
       ),
     );
-    setStatus('服务器配置已更新');
+    setStatus('SSH 配置已保存（密码保存在本浏览器，换设备需重新填写）');
   }
 
   function deleteCurrentServerProfile() {
@@ -2270,7 +2319,7 @@ export function VisualizationPage() {
                         })}
                       </div>
                       <div className="viz-terminal-server-actions">
-                        <button type="button" className="viz-terminal-btn-add" onClick={() => setShowServerConfig(true)}>
+                        <button type="button" className="viz-terminal-btn-add" onClick={openAddServerForm}>
                           添加服务器
                         </button>
                         <button type="button" className="btn secondary" onClick={() => setShowServerConfig((v) => !v)}>
@@ -2282,45 +2331,65 @@ export function VisualizationPage() {
                       </div>
                       {showServerConfig ? (
                         <div className="viz-terminal-server-form">
+                          <p className="viz-terminal-server-hint">
+                            填写<strong>远程计算服务器</strong>的 SSH 信息（不是网站登录密码）。配置保存在本浏览器，每位用户可添加多台服务器。
+                          </p>
+                          <div className="viz-terminal-server-form-section">编辑当前服务器</div>
                           <label className="field">
-                            主机
-                            <input value={host} onChange={(e) => setHost(e.target.value)} />
+                            远程 IP / 主机名
+                            <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="如 192.168.1.10 或 hpc.example.com" />
                           </label>
                           <label className="field">
-                            端口
+                            SSH 端口
                             <input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
                           </label>
                           <label className="field">
-                            用户名
-                            <input value={username} onChange={(e) => setUsername(e.target.value)} />
+                            SSH 用户名
+                            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="远程 Linux 账号，如 root" />
                           </label>
                           <label className="field">
-                            登录密码
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="可选" />
+                            SSH 登录密码
+                            <input
+                              type="password"
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              placeholder="远程服务器提供的 SSH 密码"
+                              autoComplete="off"
+                            />
                           </label>
-                          <button className="btn secondary" onClick={updateCurrentServerProfile}>更新当前服务器</button>
-                          <button className="btn secondary" onClick={deleteCurrentServerProfile}>删除当前服务器</button>
+                          <button type="button" className="btn secondary" onClick={updateCurrentServerProfile}>
+                            保存当前配置
+                          </button>
+                          <div className="viz-terminal-server-form-section">添加新服务器</div>
                           <label className="field">
-                            新服务器名称
+                            名称（可选）
                             <input value={newServerName} onChange={(e) => setNewServerName(e.target.value)} placeholder="如: 计算节点 A" />
                           </label>
                           <label className="field">
-                            新服务器主机
+                            远程 IP / 主机名
                             <input value={newServerHost} onChange={(e) => setNewServerHost(e.target.value)} placeholder="10.0.0.12" />
                           </label>
                           <label className="field">
-                            端口
+                            SSH 端口
                             <input type="number" value={newServerPort} onChange={(e) => setNewServerPort(Number(e.target.value))} />
                           </label>
                           <label className="field">
-                            用户名
+                            SSH 用户名
                             <input value={newServerUsername} onChange={(e) => setNewServerUsername(e.target.value)} placeholder="ubuntu" />
                           </label>
                           <label className="field">
-                            登录密码
-                            <input type="password" value={newServerPassword} onChange={(e) => setNewServerPassword(e.target.value)} placeholder="可选" />
+                            SSH 登录密码
+                            <input
+                              type="password"
+                              value={newServerPassword}
+                              onChange={(e) => setNewServerPassword(e.target.value)}
+                              placeholder="远程服务器提供的 SSH 密码"
+                              autoComplete="new-password"
+                            />
                           </label>
-                          <button className="btn" onClick={addServerProfile}>新建/添加服务器</button>
+                          <button type="button" className="btn" onClick={addServerProfile}>
+                            添加服务器
+                          </button>
                         </div>
                       ) : null}
                     </aside>
