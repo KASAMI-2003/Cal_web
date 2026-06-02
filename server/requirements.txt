@@ -33,3 +33,6 @@ ase>=3.22,<4
 # --- SSH 终端与进度条 ---
 paramiko>=3.0,<6
 tqdm>=4.66,<5
+
+# --- JWT（与 Rust 登录 token 校验一致）---
+PyJWT>=2.8,<3

@@ -135,10 +135,30 @@ def handle_vasp_import_request(data):
 
     extra_meta = {
         k: data.get(k)
-        for k in ('functional', 'encut', 'k_mesh', 'temperature_K', 'soc', 'work_dir', 'notes')
+        for k in (
+            'functional',
+            'encut',
+            'k_mesh',
+            'temperature_K',
+            'soc',
+            'work_dir',
+            'notes',
+            'strain_fit_residual',
+            'k_convergence_tier',
+            'calc_exp_deviation_label',
+            '应变拟合残差',
+            'k点收敛档位',
+            'K点收敛档位',
+            '计算—实验偏差标签',
+            '计算-实验偏差标签',
+            '计算实验偏差标签',
+        )
         if k in data
     }
 
+    work_dir = (data.get('work_dir') or '').strip() or None
+    scan_dir = (data.get('scan_dir') or data.get('scanDir') or '').strip() or None
+    resolved_dir = work_dir or scan_dir
     try:
         result = build_import_result(
             element=(data.get('element') or data.get('元素') or '').strip(),
@@ -146,11 +166,14 @@ def handle_vasp_import_request(data):
             method=(data.get('method') or 'summary').strip(),
             username=username,
             cij=cij,
-            work_dir=(data.get('work_dir') or '').strip() or None,
-            scan_dir=(data.get('scan_dir') or data.get('scanDir') or '').strip() or None,
+            work_dir=work_dir,
+            scan_dir=scan_dir,
             notes=(data.get('notes') or data.get('备注') or '').strip(),
             extra_meta=extra_meta or None,
         )
+        from cal_platform.qc_workflow import enrich_import_with_qc
+
+        result = enrich_import_with_qc(result, resolved_dir)
     except ValueError as e:
         return {'success': False, 'message': str(e)}
     except Exception as e:
@@ -261,7 +284,10 @@ def _open_paramiko_shell_channel(msg):
         connect_kw['key_filename'] = key_path
 
     if 'password' not in connect_kw and 'key_filename' not in connect_kw and 'pkey' not in connect_kw:
-        raise ValueError('需要提供密码，或在 ~/.ssh/ 放置 id_ed25519 / id_rsa，或通过 auth 传入 privateKey')
+        raise ValueError(
+            '需要提供密码，或在运行 pyserver 的用户（如 root）的 ~/.ssh/ 放置 id_ed25519 / id_rsa，'
+            '或通过 auth 传入 privateKey'
+        )
 
     client.connect(**connect_kw)
     channel = client.invoke_shell(term=term, width=cols, height=rows, width_pixels=wp, height_pixels=hp)
@@ -623,7 +649,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 添加CORS头
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         super().end_headers()
 
     def parse_path(self):
@@ -769,6 +795,14 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 if _compute_anisotropy_bundle is None:
                     raise RuntimeError('anisotropy_surface 模块不可用')
                 alloy_row, _ent = _twin_resolve_alloy_row(qs)
+                metal_sym = (qs.get('metal') or qs.get('element') or [None])[0]
+                if metal_sym and not alloy_row:
+                    try:
+                        from digital_twin.metal_presets import alloy_row_from_preset
+
+                        alloy_row = alloy_row_from_preset(str(metal_sym))
+                    except Exception:
+                        pass
                 payload = _compute_anisotropy_bundle(
                     T_K, P_GPa, n_phi, n_theta, n_chi, alloy_row=alloy_row
                 )
@@ -782,6 +816,52 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-type', 'application/json; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+        elif path == '/api/digital_twin/metal_presets':
+            from digital_twin.metal_presets import METAL_PRESETS
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({'presets': METAL_PRESETS}, ensure_ascii=False).encode('utf-8'))
+        elif path == '/api/digital_twin/fedorov_crosscheck':
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            symbol = (qs.get('symbol') or qs.get('element') or ['Cu'])[0]
+            try:
+                from digital_twin.fedorov_crosscheck import crosscheck_metal
+
+                payload = crosscheck_metal(str(symbol))
+            except Exception as e:
+                payload = {'success': False, 'message': str(e)}
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        elif path == '/api/outcar_tail':
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            work_dir = (qs.get('dir') or qs.get('work_dir') or ['.'])[0]
+            from cal_platform.legacy_handlers import parse_outcar_tail
+
+            payload = parse_outcar_tail(work_dir)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        elif path == '/api/extended_properties':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        'modules': ['band_structure', 'dos', 'phonon'],
+                        'status': 'reserved',
+                        'message': '扩展物性模块接口已预留，待接入 VASP/phonopy 输出',
+                    },
+                    ensure_ascii=False,
+                ).encode('utf-8')
+            )
         elif path == '/api/digital_twin/capabilities':
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
@@ -895,16 +975,102 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 fuzzy = data.get('fuzzy', True)
                 case_sensitive = data.get('case_sensitive', False)
                 search_in = data.get('search_in', 'name')
+                filters = data.get('filters') or {}
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 try:
-                    result = page2_search_db(q, fuzzy=fuzzy, case_sensitive=case_sensitive, search_in=search_in)
+                    result = page2_search_db(
+                        q,
+                        fuzzy=fuzzy,
+                        case_sensitive=case_sensitive,
+                        search_in=search_in,
+                        filters=filters,
+                    )
                     safe_result = _to_json_serializable(result)
                     self.wfile.write(json.dumps(safe_result).encode('utf-8'))
                 except Exception as e:
                     logging.warning("page2_search 异常: %s", e)
                     self.wfile.write(json.dumps({"elements": [], "materials": [], "error": str(e)}).encode('utf-8'))
+
+            elif path == '/mysql_changeData':
+                from cal_platform.legacy_handlers import handle_mysql_change_data
+
+                resp = handle_mysql_change_data(data)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(resp, ensure_ascii=False).encode('utf-8'))
+
+            elif path == '/create_matrix':
+                from cal_platform.legacy_handlers import handle_create_matrix
+
+                resp = handle_create_matrix(data)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(resp, ensure_ascii=False).encode('utf-8'))
+
+            elif path == '/execute_ssh':
+                from cal_platform.legacy_handlers import handle_execute_ssh
+
+                resp = handle_execute_ssh(data)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(resp, ensure_ascii=False).encode('utf-8'))
+
+            elif path == '/api/home_search':
+                q = (data.get('q') or data.get('query') or '').strip()
+                filters = data.get('filters') or {}
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                try:
+                    local = page2_search_db(q, search_in='property', filters=filters)
+                    mp_lines = []
+                    mp_error = None
+                    try:
+                        mp_raw = get_data(q or element, num_element)
+                        mp_lines = mp_raw or []
+                    except Exception as exc:
+                        mp_error = str(exc)
+                    payload = {
+                        'local': local,
+                        'mp_api': {'message': mp_lines, 'error': mp_error},
+                        'merged_count': len(local.get('elements', [])) + len(local.get('materials', [])),
+                    }
+                    self.wfile.write(json.dumps(_to_json_serializable(payload), ensure_ascii=False).encode('utf-8'))
+                except Exception as e:
+                    self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+
+            elif path == '/api/data_fit/link_compound':
+                from cal_platform.auth_jwt import require_auth
+
+                user, auth_err = require_auth(self.headers, data.get('username'))
+                if auth_err:
+                    self.send_response(401)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'success': False, 'message': auth_err}).encode('utf-8'))
+                    return
+                compound = (data.get('element') or data.get('化合物') or '').strip()
+                fit_payload = data.get('fit_result') or {}
+                if not compound:
+                    resp = {'success': False, 'message': '需要 element/化合物'}
+                else:
+                    note = json.dumps(fit_payload, ensure_ascii=False)[:2000]
+                    row = {
+                        '元素': compound,
+                        '备注': f'拟合关联 by {user}: {note}',
+                        'data_source': 'data_fit_link',
+                    }
+                    err = data_input_insert_to_db(row, 'element_inf')
+                    resp = {'success': err is None, 'message': '已写入 element_inf' if err is None else str(err)}
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(resp, ensure_ascii=False).encode('utf-8'))
 
             elif path == '/data_input/submit':
                 username = (data.get('username') or '').strip()
@@ -1203,6 +1369,9 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
             import time
             if action == 'reject':
+                from cal_platform.qc_workflow import mark_human_confirmed
+
+                mark_human_confirmed(app, admin_user, 'reject')
                 app['status'] = 'rejected'
                 app['reviewed_at'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
                 _save_data_input_applications()
@@ -1225,6 +1394,9 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(json.dumps({'success': False, 'message': '写入数据库失败: ' + str(err)}).encode('utf-8'))
                     return
+                from cal_platform.qc_workflow import mark_human_confirmed
+
+                mark_human_confirmed(app, admin_user, 'approve')
                 app['status'] = 'approved'
                 app['target_db'] = target_db
                 app['reviewed_at'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
@@ -1244,7 +1416,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.end_headers()
 
 #运算行为
@@ -1982,15 +2154,14 @@ def _page2_build_where(cols, q, fuzzy, case_sensitive, numeric_cols=None):
     return " OR ".join(conditions), params
 
 
-def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name"):
+def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", filters=None):
     """
     Page2 检索：在 element_inf 和 materials 中搜索。
-    query: 检索词
-    fuzzy: True=模糊(LIKE %q%), False=精确(=)
-    case_sensitive: 是否区分大小写
-    search_in: 'name'=仅名称, 'property'=名称+性质/数字
-    返回: { "elements": [...], "materials": [...] }
+    filters: {structure, method, young_min, young_max, stability}
+    返回: { "elements": [...], "materials": [...], "mp_source"?: str }
     """
+    from cal_platform.search_filters import apply_search_filters
+
     elements = []
     materials = []
     if not query or len(query) < 1:
@@ -2079,15 +2250,28 @@ def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name"):
     except Exception as e:
         logging.warning("page2_search materials: %s", e)
 
-    # 3. Materials Project
+    # 3. Materials Project（带缓存降级）
     mp_materials = []
+    mp_source = 'empty'
     try:
-        mp_materials = page2_search_mp(q, fuzzy, case_sensitive, search_in)
+        from cal_platform.mp_cache import search_mp_with_fallback
+
+        def _mp_fn():
+            return page2_search_mp(q, fuzzy, case_sensitive, search_in)
+
+        mp_materials, mp_source = search_mp_with_fallback(q, _mp_fn, search_in)
     except Exception as e:
         logging.warning("page2_search mp: %s", e)
+        try:
+            mp_materials = page2_search_mp(q, fuzzy, case_sensitive, search_in)
+            mp_source = 'live'
+        except Exception as e2:
+            logging.warning("page2_search mp fallback: %s", e2)
 
     materials.extend(mp_materials)
-    return {"elements": elements, "materials": materials}
+    filtered = apply_search_filters(elements, materials, filters)
+    filtered['mp_source'] = mp_source
+    return filtered
 
 
 def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):

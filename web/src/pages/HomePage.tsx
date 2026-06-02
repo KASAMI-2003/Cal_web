@@ -80,6 +80,9 @@ export function HomePage() {
   const [demoOpen, setDemoOpen] = useState(false);
   const [inputThing, setInputThing] = useState('2U-Nb');
   const [resultText, setResultText] = useState('');
+  const [homeQuery, setHomeQuery] = useState('Cu');
+  const [homeStructure, setHomeStructure] = useState('all');
+  const [homeSearchResult, setHomeSearchResult] = useState('');
 
   useEffect(() => {
     document.title = '基本物性集成计算平台';
@@ -139,6 +142,40 @@ export function HomePage() {
       setResultText(`获取数据失败: ${(error as Error).message}`);
     }
   }, [inputThing]);
+
+  const runHomeParallelSearch = useCallback(async () => {
+    const q = homeQuery.trim();
+    if (!q) {
+      setHomeSearchResult('请输入元素或化学式');
+      return;
+    }
+    setHomeSearchResult('正在并联检索本地 MySQL 与 MP-API…');
+    try {
+      const res = (await pythonApi.homeSearch({
+        q,
+        filters: { structure: homeStructure },
+      })) as {
+        local?: { elements?: unknown[]; materials?: unknown[]; mp_source?: string };
+        mp_api?: { message?: string[]; error?: string };
+        merged_count?: number;
+      };
+      const localCount =
+        (res.local?.elements?.length ?? 0) + (res.local?.materials?.length ?? 0);
+      const mpLines = res.mp_api?.message?.slice(0, 8) ?? [];
+      setHomeSearchResult(
+        [
+          `本地命中 ${localCount} 条（MP 源: ${res.local?.mp_source ?? 'n/a'}）`,
+          `MP-API 摘要 ${mpLines.length} 行`,
+          ...mpLines.map(String),
+          res.mp_api?.error ? `MP 错误: ${res.mp_api.error}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    } catch (error) {
+      setHomeSearchResult(`检索失败: ${(error as Error).message}`);
+    }
+  }, [homeQuery, homeStructure]);
 
   return (
     <div className="home-mainpage">
@@ -213,6 +250,32 @@ export function HomePage() {
           </div>
         </div>
       </div>
+
+      <section className="home-site-section">
+        <div className="home-container">
+          <h2 className="home-section-title">多源弹性数据检索</h2>
+          <p>并联查询本地 MySQL 物性库与 Materials Project；可按晶系筛选（fcc/bcc/hcp）。</p>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <label className="field">
+              元素/化学式
+              <input value={homeQuery} onChange={(e) => setHomeQuery(e.target.value)} placeholder="Cu / Al / Nb" />
+            </label>
+            <label className="field">
+              晶系
+              <select value={homeStructure} onChange={(e) => setHomeStructure(e.target.value)}>
+                <option value="all">全部</option>
+                <option value="fcc">fcc</option>
+                <option value="bcc">bcc</option>
+                <option value="hcp">hcp</option>
+              </select>
+            </label>
+            <button type="button" className="btn" onClick={runHomeParallelSearch}>
+              并联检索
+            </button>
+          </div>
+          <textarea className="home-result-textarea" readOnly rows={8} value={homeSearchResult} />
+        </div>
+      </section>
 
       <section id="vasp-documentation" className="home-site-section home-vasp-documentation">
         <div className="home-container">
@@ -391,13 +454,8 @@ export function HomePage() {
           <h2 className="home-section-title">辅助文档</h2>
           <div className="home-doc-content home-doc-content--user">
             <h3>使用方法</h3>
-            <p>进入网站可看到下面有着我们最初制作的脚本示例，可打开后进行尝试。</p>
-            <h4>登录部分</h4>
-            <div className="home-image-placeholder">
-              <img src="/img/doc/login.jpg" alt="登录界面" className="home-doc-image" />
-            </div>
-            <p>登录部分需要有了稳定的服务器后再去开启。</p>
-            <h4>可视化网页部分（主要功能）</h4>
+            <p>登录后进入「可视化网页」：拖动周期表元素检索本地库与 MP；「数据录入」提交审核；「数据拟合」可关联化合物记录。</p>
+            <h4>可视化网页（主要功能）</h4>
             <div className="home-image-placeholder">
               <img src="/img/doc/visual.jpg" alt="可视化界面" className="home-doc-image" />
             </div>
@@ -412,14 +470,7 @@ export function HomePage() {
             <div className="home-image-placeholder">
               <img src="/img/doc/with-db-data.jpg" alt="有本地数据" className="home-doc-image" />
             </div>
-            <p>在第二页中是数据库的访问，在此处可以获取或更改数据库数据。</p>
-            <div className="home-image-placeholder">
-              <img src="/img/doc/database.jpg" alt="数据库访问" className="home-doc-image" />
-            </div>
-            <p>如果数据库有变或者第一次打开网页时我们需要点击下方重新加载数据的按钮，稍等片刻后会出现数据。请在加载完后进行保存，否则下次打开仍然不会直接显示数据。</p>
-            <div className="home-image-placeholder">
-              <img src="/img/doc/reload.jpg" alt="重新加载数据" className="home-doc-image" />
-            </div>
+            <p>在第二页「数据录入」或可视化页终端可提交 VASP 入库；管理员在「我的 → 管理审核」完成四步 QC 最后确认。</p>
             <p>在可视化网页的最后一页是服务器终端，可供临时使用。</p>
             <div className="home-image-placeholder">
               <img src="/img/doc/terminal.jpg" alt="服务器终端" className="home-doc-image" />

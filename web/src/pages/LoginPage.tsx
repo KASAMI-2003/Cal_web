@@ -17,7 +17,7 @@ export function LoginPage() {
     try {
       const resp = await rustApi.login({ username: username.trim(), password });
       if (resp.success) {
-        setAuthState(username.trim());
+        setAuthState(username.trim(), resp.data?.token);
         setMessage('登录成功');
         navigate('/');
         return;

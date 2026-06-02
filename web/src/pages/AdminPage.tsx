@@ -139,6 +139,39 @@ export function AdminPage() {
             ) : null}
             {item.cij ? <p className="mono">Cij (GPa): {JSON.stringify(item.cij)}</p> : null}
             {item.moduli ? <p className="mono">多晶模量: {JSON.stringify(item.moduli)}</p> : null}
+            {item.quality && Object.keys(item.quality).length > 0 ? (
+              <div className="vasp-quality-meta">
+                <strong>质量与收敛</strong>
+                <ul>
+                  {item.quality.strain_fit_residual ? (
+                    <li>应变拟合残差: {item.quality.strain_fit_residual}</li>
+                  ) : null}
+                  {item.quality.k_convergence_tier ? (
+                    <li>k 点收敛档位: {item.quality.k_convergence_tier}</li>
+                  ) : null}
+                  {item.quality.calc_exp_deviation_label ? (
+                    <li>计算—实验偏差标签: {item.quality.calc_exp_deviation_label}</li>
+                  ) : null}
+                </ul>
+              </div>
+            ) : null}
+            {(item as { mare_report?: { mare_pct?: number } }).mare_report?.mare_pct != null ? (
+              <p className="mono">MARE: {(item as { mare_report?: { mare_pct?: number } }).mare_report!.mare_pct}%</p>
+            ) : null}
+            {(item as { qc_workflow?: { steps?: Array<{ step: number; name: string; status: string }> } }).qc_workflow ? (
+              <div className="vasp-quality-meta">
+                <strong>QC 四步流程</strong>
+                <ul>
+                  {((item as { qc_workflow?: { steps?: Array<{ step: number; name: string; status: string }> } }).qc_workflow?.steps ?? []).map(
+                    (s) => (
+                      <li key={s.step}>
+                        {s.step}. {s.name}: {s.status}
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            ) : null}
             <h4 style={{ marginBottom: 8 }}>待写入字段</h4>
             {formatDbPreview(item.data as Record<string, unknown>)}
             <details style={{ marginTop: 8 }}>

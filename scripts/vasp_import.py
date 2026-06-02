@@ -100,6 +100,12 @@ def build_payload(args: argparse.Namespace) -> dict:
         payload['encut'] = args.encut
     if args.k_mesh:
         payload['k_mesh'] = args.k_mesh
+    if args.strain_fit_residual is not None:
+        payload['strain_fit_residual'] = args.strain_fit_residual
+    if args.k_convergence_tier:
+        payload['k_convergence_tier'] = args.k_convergence_tier
+    if args.calc_exp_deviation_label:
+        payload['calc_exp_deviation_label'] = args.calc_exp_deviation_label
     if parsed_from:
         payload['notes'] = (payload['notes'] + f' | 源: {parsed_from}').strip(' |')
     return payload
@@ -127,6 +133,13 @@ def main() -> int:
     parser.add_argument('--functional', default='GGA-PBE')
     parser.add_argument('--encut', help='截断能 eV')
     parser.add_argument('--k-mesh', dest='k_mesh', help='k 点密度描述')
+    parser.add_argument('--strain-fit-residual', dest='strain_fit_residual', help='应变拟合残差（如 RMSE 或 R²）')
+    parser.add_argument('--k-convergence-tier', dest='k_convergence_tier', help='k 点收敛档位（如 dense / 0.03）')
+    parser.add_argument(
+        '--calc-exp-deviation-label',
+        dest='calc_exp_deviation_label',
+        help='计算—实验偏差标签（如 within_5pct / B_high）',
+    )
     parser.add_argument('--dry-run', action='store_true', help='仅本地解析与检验，不提交 API')
     args = parser.parse_args()
 
@@ -143,7 +156,18 @@ def main() -> int:
             cij=payload['cij'],
             work_dir=payload.get('work_dir'),
             notes=payload.get('notes', ''),
-            extra_meta={k: payload[k] for k in ('functional', 'encut', 'k_mesh') if k in payload},
+            extra_meta={
+                k: payload[k]
+                for k in (
+                    'functional',
+                    'encut',
+                    'k_mesh',
+                    'strain_fit_residual',
+                    'k_convergence_tier',
+                    'calc_exp_deviation_label',
+                )
+                if k in payload
+            },
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get('success'):

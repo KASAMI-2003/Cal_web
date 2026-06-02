@@ -133,6 +133,22 @@ powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1
 
 终端在浏览器里连接的是 **`/api/ssh/ws`（相对当前页面，即 Vite 的 host:5173）**，再由 Vite 转到本机 Python 上的终端 WebSocket 端口（默认与环境变量 `TERMINAL_WS_PORT` 一致，多为 `8765`）。`VITE_PYTHON_API_ORIGIN` 只对应 **HTTP API**，不能用来连终端；若 Python 日志提示终端端口已从默认值改掉，请在启动 `npm run dev` 的环境里同步设置相同的 `TERMINAL_WS_PORT`。
 
+**生产环境 SSH 凭据（常见报错：需要提供密码…）：**
+
+浏览器 → pyserver → **Paramiko 再 SSH 到目标机**。凭据来自页面填写的密码，或 **运行 pyserver 的系统用户**（systemd 示例为 `root`）的 `~/.ssh/id_ed25519`，不是你在网页里登录的 Cal Web 账号密码。
+
+任选其一：
+
+1. 在可视化页 **终端服务器配置** 中填写 **SSH 密码**（用户 `admin`、主机 `127.0.0.1:22` 时即 admin 的 Linux 密码）。
+2. 为 pyserver 用户配置免密（示例：pyserver 以 root 运行，终端登录 admin）：
+   ```bash
+   ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519
+   mkdir -p /home/admin/.ssh && chmod 700 /home/admin/.ssh
+   cat /root/.ssh/id_ed25519.pub >> /home/admin/.ssh/authorized_keys
+   chown -R admin:admin /home/admin/.ssh && chmod 600 /home/admin/.ssh/authorized_keys
+   ```
+3. 若本机即计算节点，也可把终端用户名改为 **root**，并在页面填写 root 密码或使用 `/root/.ssh` 密钥。
+
 ## VASP 弹性常数入库
 
 在 **OUTCAR 或汇总表所在目录** 执行 CLI，自动 Born/Mouhat 检验后提交管理员审核（`element_inf`）。
@@ -154,8 +170,12 @@ python scripts/vasp_import.py ... --dry-run
 
 # 4. 命令行直接指定 Cij（GPa）
 python scripts/vasp_import.py --username admin --element Cu --structure fcc \
-  --method energy_strain --c11 175.96 --c12 124.75 --c44 78.36
+  --method energy_strain --c11 175.96 --c12 124.75 --c44 78.36 \
+  --strain-fit-residual 1.2e-4 --k-convergence-tier dense \
+  --calc-exp-deviation-label within_5pct
 ```
+
+`POST /api/vasp/import` 另支持可选字段：`strain_fit_residual`（应变拟合残差）、`k_convergence_tier`（k 点收敛档位）、`calc_exp_deviation_label`（计算—实验偏差标签）；写入待审核记录的 `quality` / `calc_meta`，审核通过时若 `element_inf` 表有对应中文列则一并入库。
 
 - API：`POST /api/vasp/import`（与 CLI 相同 JSON 字段）
 - 可视化页 **终端 → VASP 入库** 可一键向已连接 SSH 终端插入上述命令

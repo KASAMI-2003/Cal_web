@@ -10,5 +10,8 @@
   },
   "functional": "GGA-PBE",
   "encut": "520",
-  "k_mesh": "0.03 A^-1"
+  "k_mesh": "0.03 A^-1",
+  "strain_fit_residual": "1.2e-4",
+  "k_convergence_tier": "dense",
+  "calc_exp_deviation_label": "within_5pct"
 }

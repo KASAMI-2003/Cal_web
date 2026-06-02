@@ -466,6 +466,7 @@ export function DigitalTwinPage() {
       const timeoutId = window.setTimeout(() => controller.abort(), 60000);
       const useFastGrid = scanRunningRef.current && !scanHighRes;
       const grid = useFastGrid ? { n_phi: 22, n_theta: 32, n_chi: 22 } : { n_phi: 48, n_theta: 72, n_chi: 48 };
+      const metal = localStorage.getItem('twin_metal_symbol') || '';
       const query = new URLSearchParams({
         T: String(t),
         P: String(p),
@@ -477,8 +478,9 @@ export function DigitalTwinPage() {
         n_chi: String(grid.n_chi),
         high_res: useFastGrid ? '0' : '1',
         _ts: String(params?.cacheBust ?? Date.now()),
-      }).toString();
-      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_ORIGIN || ''}/api/digital_twin/anisotropy_surface?${query}`, {
+      });
+      if (metal) query.set('metal', metal);
+      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_ORIGIN || ''}/api/digital_twin/anisotropy_surface?${query.toString()}`, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -977,8 +979,38 @@ export function DigitalTwinPage() {
         <h2 className="dt-title">弹性各向异性数字孪生（HTEM SAM）</h2>
         <p className="dt-sub">
           支持<strong>默认 HTEM 单材料</strong>（T、P）与<strong>上传表</strong>（名义成分 + c_ij）。
-          对齐原网页交互：拖拽缩放窗口、扫描动效、色标控制、窗口坞恢复与 PNG 导出。
+          已内置论文金属预设（Cu/Al/Ni/Ti）；可进行 Fedorov 离线交叉校验。
         </p>
+        <div className="row" style={{ marginBottom: 12 }}>
+          {['Cu', 'Al', 'Ni', 'Ti'].map((sym) => (
+            <button
+              key={sym}
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                localStorage.setItem('twin_metal_symbol', sym);
+                setStatus(`已切换金属预设 ${sym}（回退曲面时使用论文 VASP 数据）`);
+              }}
+            >
+              金属 {sym}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={async () => {
+              const sym = localStorage.getItem('twin_metal_symbol') || 'Cu';
+              try {
+                const r = await pythonApi.fedorovCrosscheck(sym);
+                setStatus(r.message || JSON.stringify(r));
+              } catch (e) {
+                setStatus(`交叉校验失败: ${(e as Error).message}`);
+              }
+            }}
+          >
+            Fedorov 交叉校验
+          </button>
+        </div>
 
         <div className="dt-layout">
           <aside className="dt-panel">

@@ -342,6 +342,21 @@ body {
   word-break: break-word;
 }
 
+.deviation-good .search-v { color: #15803d; font-weight: 600; }
+.deviation-warn .search-v { color: #ca8a04; font-weight: 600; }
+.deviation-bad .search-v { color: #dc2626; font-weight: 600; }
+
+.viz-outcar-preview {
+  max-height: 200px;
+  overflow: auto;
+  font-size: 11px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
 .viz-layout {
   display: grid;
   grid-template-columns: 1fr 320px;
@@ -2469,6 +2484,16 @@ body {
 .vasp-db-preview dd {
   margin: 0;
   font-family: var(--mono, ui-monospace, monospace);
+}
+
+.vasp-quality-meta {
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.vasp-quality-meta ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 .viz-terminal-console-body {

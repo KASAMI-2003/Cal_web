@@ -4,6 +4,7 @@ interface RequestOptions<TBody> {
   method?: HttpMethod;
   body?: TBody;
   baseUrl?: string;
+  headers?: Record<string, string>;
 }
 
 function buildUrl(path: string, baseUrl?: string): string {
@@ -24,6 +25,7 @@ export async function requestJson<TResponse, TBody = unknown>(
     method: options.method ?? 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...(options.headers ?? {}),
     },
     credentials: 'same-origin',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

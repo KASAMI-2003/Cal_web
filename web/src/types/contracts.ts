@@ -23,7 +23,18 @@ export interface DataInputApplication {
   moduli?: Record<string, number>;
   stability?: VaspStabilityReport;
   calc_meta?: Record<string, unknown>;
+  quality?: VaspImportQualityFields;
   suggested_target_db?: 'element_inf' | 'materials';
+}
+
+/** VASP 入库质量/收敛预留字段（与 POST /api/vasp/import 一致） */
+export interface VaspImportQualityFields {
+  /** 应变拟合残差，如 RMSE、R² */
+  strain_fit_residual?: string;
+  /** k 点收敛档位，如 dense / 0.03 A^-1 */
+  k_convergence_tier?: string;
+  /** 计算—实验偏差标签，如 within_5pct */
+  calc_exp_deviation_label?: string;
 }
 
 export interface VaspStabilityCheck {
@@ -54,6 +65,12 @@ export interface VaspImportRequest {
   functional?: string;
   encut?: string;
   k_mesh?: string;
+  /** 应变拟合残差 */
+  strain_fit_residual?: string | number;
+  /** k 点收敛档位 */
+  k_convergence_tier?: string;
+  /** 计算—实验偏差标签 */
+  calc_exp_deviation_label?: string;
 }
 
 export interface VaspImportResponse {
@@ -63,6 +80,8 @@ export interface VaspImportResponse {
   message?: string;
   stability?: VaspStabilityReport;
   db_data?: Record<string, string>;
+  quality?: VaspImportQualityFields;
+  calc_meta?: VaspImportQualityFields & Record<string, unknown>;
 }
 
 export interface DataInputListResponse {
@@ -156,6 +175,10 @@ export interface RustAuthRequest {
 export interface RustAuthResponse {
   success: boolean;
   message: string;
+  data?: {
+    token?: string;
+    username?: string;
+  };
 }
 
 export interface RustUserInfoResponse {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent } from 'react';
 import { pythonApi } from '../api/pythonApi';
+import { getAuthState } from '../auth/authStore';
 import type { DataFitResponse } from '../types/contracts';
 
 interface PointRow {
@@ -43,6 +44,8 @@ export function DataFittingPage() {
   const [zoomBounds, setZoomBounds] = useState<ChartBounds | null>(null);
   const [hoverPoint, setHoverPoint] = useState<{ px: number; py: number; x: number; y: number } | null>(null);
   const [status, setStatus] = useState('');
+  const [linkCompound, setLinkCompound] = useState('Cu');
+  const auth = getAuthState();
 
   const parsed = useMemo(() => {
     const data = points
@@ -272,6 +275,27 @@ export function DataFittingPage() {
     setHoverPoint({ px, py, x: dataPoint.x, y: dataPoint.y });
   }
 
+  async function linkResultToCompound() {
+    if (!result || result.status !== 'success') {
+      setStatus('请先完成一次成功拟合');
+      return;
+    }
+    if (!auth.username) {
+      setStatus('请先登录后再关联化合物');
+      return;
+    }
+    try {
+      const resp = await pythonApi.linkFitToCompound({
+        username: auth.username,
+        element: linkCompound.trim(),
+        fit_result: result,
+      });
+      setStatus(resp.message);
+    } catch (error) {
+      setStatus(`关联失败: ${(error as Error).message}`);
+    }
+  }
+
   function exportResultJson() {
     if (!result) {
       setStatus('暂无可导出的拟合结果');
@@ -404,6 +428,13 @@ export function DataFittingPage() {
                 <span>执行</span>
                 <button className="btn" onClick={runFit}>
                   运行拟合
+                </button>
+              </div>
+              <div className="field">
+                <span>关联化合物</span>
+                <input value={linkCompound} onChange={(e) => setLinkCompound(e.target.value)} placeholder="Cu" />
+                <button className="btn secondary" onClick={linkResultToCompound}>
+                  写入 element_inf 备注
                 </button>
               </div>
               <div className="field">

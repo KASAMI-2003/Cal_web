@@ -1,10 +1,67 @@
 mod file_db;
 use file_db::FileDatabase;
 use std::collections::HashMap;
+use std::env;
 use actix_web::{web, App, HttpServer, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use actix_cors::Cors;
+use bcrypt::{hash, verify, DEFAULT_COST};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use chrono::{Duration, Utc};
+
+const JWT_DEFAULT_SECRET: &str = "calweb-dev-jwt-secret-change-in-production";
+
+#[derive(Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: usize,
+}
+
+fn jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| JWT_DEFAULT_SECRET.to_string())
+}
+
+fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
+    hash(password, DEFAULT_COST)
+}
+
+fn verify_password(stored: &str, input: &str) -> bool {
+    if stored.starts_with("$2") {
+        verify(input, stored).unwrap_or(false)
+    } else {
+        stored == input
+    }
+}
+
+fn issue_jwt(username: &str) -> Result<String, jsonwebtoken::errors::Error> {
+    let exp = (Utc::now() + Duration::days(7)).timestamp() as usize;
+    let claims = Claims {
+        sub: username.to_string(),
+        exp,
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(jwt_secret().as_bytes()),
+    )
+}
+
+fn verify_jwt(token: &str) -> Option<String> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(jwt_secret().as_bytes()),
+        &Validation::default(),
+    )
+    .ok()
+    .map(|d| d.claims.sub)
+}
+
+#[derive(Serialize)]
+struct LoginData {
+    token: String,
+    username: String,
+}
 
 #[derive(Deserialize)]
 struct RegisterInfo {
@@ -53,7 +110,17 @@ async fn register(
 
     let mut user = HashMap::new();
     user.insert("username".to_string(), serde_json::Value::from(info.username.clone()));
-    user.insert("password".to_string(), serde_json::Value::from(info.password.clone()));
+    let password_hash = match hash_password(&info.password) {
+        Ok(h) => h,
+        Err(_) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<()> {
+                success: false,
+                message: Some("密码哈希失败".to_string()),
+                data: None,
+            });
+        }
+    };
+    user.insert("password_hash".to_string(), serde_json::Value::from(password_hash));
     user.insert("email".to_string(), serde_json::Value::from(info.email.clone().unwrap_or_default()));
     user.insert("phone".to_string(), serde_json::Value::from(info.phone.clone().unwrap_or_default()));
     user.insert("create_time".to_string(), serde_json::Value::from(chrono::Utc::now().timestamp()));
@@ -78,17 +145,12 @@ async fn register(
 }
 
 async fn login(
-    db: web::Data<Mutex<FileDatabase>>,
+    db_data: web::Data<Mutex<FileDatabase>>,
     info: web::Json<LoginInfo>,
 ) -> impl Responder {
-    let db = db.lock().unwrap();
-    let cond: HashMap<String, serde_json::Value> = [
-        ("username".to_string(), serde_json::Value::from(info.username.clone())),
-        ("password".to_string(), serde_json::Value::from(info.password.clone())),
-    ]
-    .iter()
-    .cloned()
-    .collect();
+    let db = db_data.lock().unwrap();
+    let mut cond = HashMap::new();
+    cond.insert("username".to_string(), serde_json::Value::from(info.username.clone()));
     let found = db.select("users", Some(cond));
     if found.is_empty() {
         return HttpResponse::Unauthorized().json(ApiResponse::<()> {
@@ -97,11 +159,69 @@ async fn login(
             data: None,
         });
     }
-    HttpResponse::Ok().json(ApiResponse::<()> {
-        success: true,
-        message: Some("Login success".to_string()),
-        data: None,
-    })
+    let row = &found[0];
+    let stored = row
+        .get("password_hash")
+        .or_else(|| row.get("password"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !verify_password(stored, &info.password) {
+        return HttpResponse::Unauthorized().json(ApiResponse::<()> {
+            success: false,
+            message: Some("Login failed".to_string()),
+            data: None,
+        });
+    }
+    let username = info.username.clone();
+    let needs_upgrade = !stored.starts_with("$2");
+    drop(db);
+    if needs_upgrade {
+        if let Ok(h) = hash_password(&info.password) {
+            let db = db_data.lock().unwrap();
+            let mut conditions = HashMap::new();
+            conditions.insert("username".to_string(), serde_json::Value::from(username.clone()));
+            let mut new_data = HashMap::new();
+            new_data.insert("password_hash".to_string(), serde_json::Value::from(h));
+            db.update("users", conditions, new_data);
+        }
+    }
+    match issue_jwt(&username) {
+        Ok(token) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: Some("Login success".to_string()),
+            data: Some(LoginData {
+                token,
+                username: username.clone(),
+            }),
+        }),
+        Err(_) => HttpResponse::InternalServerError().json(ApiResponse::<()> {
+            success: false,
+            message: Some("JWT 签发失败".to_string()),
+            data: None,
+        }),
+    }
+}
+
+async fn auth_verify(req: actix_web::HttpRequest) -> impl Responder {
+    let auth = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("").trim();
+    if let Some(username) = verify_jwt(token) {
+        HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: None,
+            data: Some(serde_json::json!({ "username": username, "valid": true })),
+        })
+    } else {
+        HttpResponse::Unauthorized().json(ApiResponse::<()> {
+            success: false,
+            message: Some("Invalid token".to_string()),
+            data: None,
+        })
+    }
 }
 
 /// GET /users/info?username=xxx 获取用户信息（不含密码）
@@ -324,7 +444,7 @@ async fn main() -> std::io::Result<()> {
 
     let mut user_columns = HashMap::new();
     user_columns.insert("username".to_string(), "string".to_string());
-    user_columns.insert("password".to_string(), "string".to_string());
+    user_columns.insert("password_hash".to_string(), "string".to_string());
     user_columns.insert("email".to_string(), "string".to_string());
     user_columns.insert("phone".to_string(), "string".to_string());
     user_columns.insert("create_time".to_string(), "integer".to_string());
@@ -361,6 +481,7 @@ async fn main() -> std::io::Result<()> {
             .route("/health", web::get().to(health))
             .route("/register", web::post().to(register))
             .route("/login", web::post().to(login))
+            .route("/auth/verify", web::get().to(auth_verify))
             .route("/users/info", web::get().to(users_info))
             .route("/users/update", web::put().to(users_update))
             .route("/compounds", web::get().to(compounds_list))

@@ -12,7 +12,17 @@ This file freezes backend contracts used by the TSX migration.
 - `GET /data_input/pending?admin_user=admin` -> `{ success, data }`
 - `PUT /data_input/review` -> `{ success, message }`
 - `POST /data_input/submit` -> `{ success, message, id? }`
-- `POST /api/vasp/import` -> `{ success, auto_rejected?, id?, message, stability?, db_data? }`（Born/Mouhat 通过后进入待审核）
+- `POST /api/vasp/import` -> `{ success, auto_rejected?, id?, message, stability?, db_data?, quality?, calc_meta? }`（Born/Mouhat 通过后进入待审核）
+
+  可选质量字段（JSON 体，均可省略）：
+
+  | 字段 | 说明 |
+  |------|------|
+  | `strain_fit_residual` | 应变拟合残差 |
+  | `k_convergence_tier` | k 点收敛档位 |
+  | `calc_exp_deviation_label` | 计算—实验偏差标签 |
+
+  中文别名：`应变拟合残差`、`k点收敛档位`、`计算—实验偏差标签` 亦可。
 - `POST /api/data_fit` -> `{ status, fit_func, r_squared, coeffs, x_fit, y_fit }` or `{ status: "error", message }`
 - `POST /api/terminal_reachable` -> `{ ok, reachable, ...detail }`
 - `GET /websocket_port` -> `{ port }`
@@ -33,8 +43,18 @@ This file freezes backend contracts used by the TSX migration.
 
 ## Known gaps (frontend calls but no handler in `pyserver.py`)
 
-- `POST /mysql_changeData`
-- `POST /create_matrix`
-- `POST /execute_ssh`
+- ~~`POST /mysql_changeData`~~ — implemented in `cal_platform/legacy_handlers.py`
+- ~~`POST /create_matrix`~~ — implemented
+- ~~`POST /execute_ssh`~~ — implemented
 
-TSX migration handles these as optional/legacy to avoid blocking rollout.
+## New endpoints (2026-06 thesis alignment)
+
+- `POST /api/home_search` — parallel local + MP home search
+- `POST /api/data_fit/link_compound` — link fit result to compound (JWT optional)
+- `GET /api/outcar_tail?dir=` — OUTCAR tail preview
+- `GET /api/extended_properties` — band/DOS/phonon reserved
+- `GET /api/digital_twin/metal_presets` — thesis metal Cij presets
+- `GET /api/digital_twin/fedorov_crosscheck?symbol=` — offline cross-check
+- Rust: `GET /auth/verify` — JWT validation; login returns `{ data: { token, username } }`
+
+`POST /page2_search` body may include `filters`: `{ structure, method, stability, young_min, young_max }`.

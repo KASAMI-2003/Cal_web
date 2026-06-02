@@ -1,4 +1,5 @@
 import { requestJson } from './http';
+import { authHeaders } from '../auth/authStore';
 import type {
   ActivateDatRequest,
   ActivateDatResponse,
@@ -20,12 +21,17 @@ import type {
 
 const pythonBaseUrl = import.meta.env.VITE_PYTHON_API_ORIGIN || undefined;
 
+function withAuth(extra?: Record<string, string>) {
+  return { ...authHeaders(), ...(extra ?? {}) };
+}
+
 export const pythonApi = {
   submitElement: (body: ApiSubmitRequest) =>
     requestJson<{ status: string; message: string }, ApiSubmitRequest>('/api/submit', {
       method: 'POST',
       body,
       baseUrl: pythonBaseUrl,
+      headers: withAuth(),
     }),
   queryData: (element?: string, numElement?: number) => {
     const params = new URLSearchParams();
@@ -40,18 +46,26 @@ export const pythonApi = {
   },
   mysqlReceive: (body: { element: string; text: string }) =>
     requestJson('/mysql_receive', { method: 'POST', body, baseUrl: pythonBaseUrl }),
-  page2Search: (body: { q: string; fuzzy?: boolean; case_sensitive?: boolean; search_in?: string }) =>
-    requestJson('/page2_search', { method: 'POST', body, baseUrl: pythonBaseUrl }),
+  page2Search: (body: {
+    q: string;
+    fuzzy?: boolean;
+    case_sensitive?: boolean;
+    search_in?: string;
+    filters?: Record<string, unknown>;
+  }) => requestJson('/page2_search', { method: 'POST', body, baseUrl: pythonBaseUrl }),
+  homeSearch: (body: { q: string; filters?: Record<string, unknown> }) =>
+    requestJson('/api/home_search', { method: 'POST', body, baseUrl: pythonBaseUrl, headers: withAuth() }),
   submitDataInput: (body: { username: string; data: Record<string, unknown> }) =>
     requestJson<{ success: boolean; message: string; id?: string }>('/data_input/submit', {
       method: 'POST',
       body,
       baseUrl: pythonBaseUrl,
+      headers: withAuth(),
     }),
   myDataInputs: (username: string) =>
     requestJson<DataInputListResponse>(`/data_input/my?username=${encodeURIComponent(username)}`, { baseUrl: pythonBaseUrl }),
   pendingDataInputs: () =>
-    requestJson<DataInputListResponse>('/data_input/pending?admin_user=admin', { baseUrl: pythonBaseUrl }),
+    requestJson<DataInputListResponse>('/data_input/pending?admin_user=admin', { baseUrl: pythonBaseUrl, headers: withAuth() }),
   reviewDataInput: (body: {
     id: string;
     action: 'approve' | 'reject';
@@ -62,9 +76,17 @@ export const pythonApi = {
       method: 'PUT',
       body,
       baseUrl: pythonBaseUrl,
+      headers: withAuth(),
     }),
   fitData: (body: DataFitRequest) =>
     requestJson<DataFitResponse, DataFitRequest>('/api/data_fit', { method: 'POST', body, baseUrl: pythonBaseUrl }),
+  linkFitToCompound: (body: { username: string; element: string; fit_result: DataFitResponse }) =>
+    requestJson<{ success: boolean; message: string }>('/api/data_fit/link_compound', {
+      method: 'POST',
+      body,
+      baseUrl: pythonBaseUrl,
+      headers: withAuth(),
+    }),
   terminalReachable: (body: TerminalReachableRequest) =>
     requestJson<TerminalReachableResponse, TerminalReachableRequest>('/api/terminal_reachable', {
       method: 'POST',
@@ -72,6 +94,20 @@ export const pythonApi = {
       baseUrl: pythonBaseUrl,
     }),
   getWebsocketPort: () => requestJson<{ port: number | null }>('/websocket_port', { baseUrl: pythonBaseUrl }),
+  outcarTail: (dir: string) =>
+    requestJson<{ success: boolean; tail?: string; message?: string }>(
+      `/api/outcar_tail?dir=${encodeURIComponent(dir)}`,
+      { baseUrl: pythonBaseUrl },
+    ),
+  extendedProperties: () =>
+    requestJson<{ modules: string[]; status: string; message: string }>('/api/extended_properties', {
+      baseUrl: pythonBaseUrl,
+    }),
+  fedorovCrosscheck: (symbol: string) =>
+    requestJson<{ success: boolean; message?: string; passed?: boolean }>(
+      `/api/digital_twin/fedorov_crosscheck?symbol=${encodeURIComponent(symbol)}`,
+      { baseUrl: pythonBaseUrl },
+    ),
   twinProperties: (query: string) =>
     requestJson<TwinPropertyResponse>(`/api/digital_twin/properties?${query}`, { baseUrl: pythonBaseUrl }),
   twinCapabilities: (query: string) =>
@@ -103,5 +139,6 @@ export const pythonApi = {
       method: 'POST',
       body,
       baseUrl: pythonBaseUrl,
+      headers: withAuth(),
     }),
 };

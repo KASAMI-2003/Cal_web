@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from .moduli import compute_moduli, moduli_to_db_fields
 from .parser import merge_manual_cij, scan_work_dir
+from .quality_fields import extract_quality_fields, quality_fields_to_db
 from .stability import check_stability
 
 VALID_METHODS = ('stress_strain', 'energy_strain', 'summary', 'outcar_elastic_tensor', 'manual')
@@ -65,6 +66,10 @@ def build_import_result(
     if not cij:
         raise ValueError('未能解析任何 Cij 分量')
 
+    quality_meta = extract_quality_fields(extra_meta)
+    if not quality_meta and parsed_meta:
+        quality_meta = extract_quality_fields(parsed_meta)
+
     crystal_system = _structure_to_system(structure or str(parsed_meta.get('structure', '')))
     stability = check_stability(crystal_system, cij)
     moduli = compute_moduli(stability['crystal_system'], {k: float(v) for k, v in cij.items()})
@@ -79,6 +84,7 @@ def build_import_result(
         if cij.get(k) is not None:
             db_data[k] = str(round(cij[k], 4))
     db_data.update(moduli_to_db_fields(moduli))
+    db_data.update(quality_fields_to_db(quality_meta))
     db_data['data_source'] = f'VASP {method}'
     if notes:
         db_data['备注'] = notes
@@ -97,6 +103,7 @@ def build_import_result(
         'stability_passed': stability['passed'],
         'suggested_target_db': 'element_inf',
     }
+    calc_meta.update(quality_meta)
     if extra_meta:
         calc_meta.update({k: v for k, v in extra_meta.items() if k not in calc_meta})
 
@@ -109,6 +116,7 @@ def build_import_result(
         'username': username,
         'cij': {k: round(float(v), 4) for k, v in cij.items()},
         'moduli': moduli,
+        'quality': quality_meta,
         'stability': stability,
         'db_data': db_data,
         'calc_meta': calc_meta,
@@ -148,9 +156,13 @@ def submit_import_application(
         'data': result['db_data'],
         'cij': result.get('cij'),
         'moduli': result.get('moduli'),
+        'quality': result.get('quality'),
         'stability': result.get('stability'),
         'calc_meta': result.get('calc_meta'),
         'method': result.get('method'),
+        'mare_report': result.get('mare_report'),
+        'dual_method': result.get('dual_method'),
+        'qc_workflow': result.get('qc_workflow'),
         'status': 'pending',
         'suggested_target_db': 'element_inf',
         'created_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),

@@ -8,6 +8,8 @@ import os
 import re
 from typing import Any
 
+from .quality_fields import extract_quality_fields
+
 CIJ_KEYS = ('C11', 'C12', 'C13', 'C33', 'C44')
 SCAN_FILENAMES = (
     'elastic_import.json',
@@ -63,6 +65,7 @@ def parse_json_file(path: str) -> dict[str, Any]:
     else:
         parsed = parse_cij_dict(data)
     meta = {k: data.get(k) for k in ('element', 'structure', 'method', 'work_dir', 'notes') if k in data}
+    meta.update(extract_quality_fields(data))
     return {'cij': parsed, 'meta': meta, 'source_file': os.path.basename(path)}
 
 

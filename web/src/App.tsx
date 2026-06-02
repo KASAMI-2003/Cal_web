@@ -72,14 +72,22 @@ function TopNav() {
             弹性孪生可视化
           </NavLink>
         </li>
+        <li className="site-header-nav__item">
+          <NavLink
+            to="/data-input"
+            className={({ isActive }) => `site-header-nav__link${isActive ? ' site-header-nav__link--active' : ''}`}
+          >
+            数据录入
+          </NavLink>
+        </li>
         <li className="site-header-nav__item dropdown">
           <a href="#" className="site-header-nav__link">
             联系我们
           </a>
           <div className="dropdown-content">
-            <div className="contact-item"><i>📞</i><span>电话：</span></div>
-            <div className="contact-item"><i>📧</i><span>邮箱：</span></div>
-            <div className="contact-item"><i>📍</i><span>地址：</span></div>
+            <div className="contact-item"><i>📞</i><span>电话：027-87543228</span></div>
+            <div className="contact-item"><i>📧</i><span>邮箱：tianfuyang@hust.edu.cn</span></div>
+            <div className="contact-item"><i>📍</i><span>地址：华中科技大学物理学院</span></div>
           </div>
         </li>
         <li className="site-header-nav__item site-header-nav__item--mine">

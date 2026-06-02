@@ -87,17 +87,51 @@ def _default_cij_at_tp(T_K: float, P_GPa: float) -> tuple[float, float, float, f
 class _NumpyElasticity:
     """无 HTEM 依赖的轻量弹性对象，供曲面与 Christoffel 声速计算。"""
 
-    def __init__(self, c11, c12, c44, rho, T_K, P_GPa):
+    def __init__(self, c11, c12, c44, rho, T_K, P_GPa, crystal_system='cubic', c13=None, c33=None):
         self.T = float(T_K)
         self.P = float(P_GPa)
         self.rho = float(rho)
-        self.C_matrix = _cubic_C_matrix(c11, c12, c44)
+        self.crystal_system = crystal_system
+        cij = {'C11': c11, 'C12': c12, 'C44': c44}
+        if crystal_system in ('hexagonal', 'hcp', 'hex') and c13 is not None and c33 is not None:
+            cij['C13'] = c13
+            cij['C33'] = c33
+        try:
+            from digital_twin.crystal_elastic import build_C_matrix
+
+            self.C_matrix = build_C_matrix(crystal_system, cij)
+        except Exception:
+            self.C_matrix = _cubic_C_matrix(c11, c12, c44)
         self.S_matrix_Fedorov = _fedorov_S_from_C(self.C_matrix)
+
+
+def _metal_cij_fallback(symbol: str, T_K: float, P_GPa: float):
+    """优先使用论文金属预设，否则 Si 参考。"""
+    try:
+        from digital_twin.metal_presets import get_metal_preset
+
+        p = get_metal_preset(symbol)
+        if p:
+            return (
+                p['c11'],
+                p['c12'],
+                p['c44'],
+                p['rho'],
+                p.get('crystal_system', 'cubic'),
+                p.get('c13'),
+                p.get('c33'),
+                f"metal_preset_{symbol}",
+            )
+    except Exception:
+        pass
+    c11, c12, c44, rho = _default_cij_at_tp(T_K, P_GPa)
+    return c11, c12, c44, rho, 'cubic', None, None, 'numpy_fallback_si'
 
 
 def _build_elasticity_numpy(alloy_row: dict | None, T_K: float, P_GPa: float) -> _NumpyElasticity:
     if alloy_row is not None:
         rho = float(alloy_row.get('rho') or 6.5)
+        crystal = alloy_row.get('crystal_system') or 'cubic'
         return _NumpyElasticity(
             float(alloy_row['c11']),
             float(alloy_row['c12']),
@@ -105,9 +139,15 @@ def _build_elasticity_numpy(alloy_row: dict | None, T_K: float, P_GPa: float) ->
             rho,
             T_K,
             P_GPa,
+            crystal_system=crystal,
+            c13=alloy_row.get('c13'),
+            c33=alloy_row.get('c33'),
         )
-    c11, c12, c44, rho = _default_cij_at_tp(T_K, P_GPa)
-    return _NumpyElasticity(c11, c12, c44, rho, T_K, P_GPa)
+    sym = os.environ.get('TWIN_METAL_SYMBOL', 'Cu')
+    c11, c12, c44, rho, crystal, c13, c33, _tag = _metal_cij_fallback(sym, T_K, P_GPa)
+    return _NumpyElasticity(
+        c11, c12, c44, rho, T_K, P_GPa, crystal_system=crystal, c13=c13, c33=c33
+    )
 
 
 def _youngs_E_surface_numpy(S_fedorov, n_phi: int, n_theta: int):
@@ -193,7 +233,7 @@ def _compute_anisotropy_numpy_fallback(
         'n_phi': n_phi,
         'n_theta': n_theta,
         'n_chi': n_chi,
-        'model': 'numpy_fallback_si',
+        'model': 'numpy_fallback_metal' if alloy_row is None else 'numpy_alloy',
         'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
         'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
         'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),

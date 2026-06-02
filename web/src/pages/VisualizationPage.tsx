@@ -39,7 +39,13 @@ interface MaterialOption {
   tag: string;
   kind: SearchKind;
   data: Record<string, unknown>;
+  deviationLevel?: 'good' | 'warn' | 'bad';
+  deviationPct?: number;
 }
+
+type StructureFilter = 'all' | 'fcc' | 'bcc' | 'hcp';
+type MethodFilter = 'all' | 'stress_strain' | 'energy_strain';
+type StabilityFilter = 'all' | 'passed' | 'failed' | 'review';
 
 interface LatticeRenderData {
   positions: number[][];
@@ -529,6 +535,12 @@ export function VisualizationPage() {
   const [elementKeyword, setElementKeyword] = useState('');
   const [droppedSymbols, setDroppedSymbols] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [structureFilter, setStructureFilter] = useState<StructureFilter>('all');
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>('all');
+  const [stabilityFilter, setStabilityFilter] = useState<StabilityFilter>('all');
+  const [youngMin, setYoungMin] = useState('');
+  const [youngMax, setYoungMax] = useState('');
+  const [outcarPreview, setOutcarPreview] = useState('');
   const [materialPickerQuery, setMaterialPickerQuery] = useState('');
   const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
@@ -1247,11 +1259,17 @@ export function VisualizationPage() {
             const msg = JSON.parse(ev.data) as { type?: string; message?: string };
             if (msg.type === 'auth-error') {
               xtermRef.current?.writeln(`\r\n\x1b[31m${msg.message || '连接失败'}\x1b[0m`);
+              if (!password.trim()) {
+                xtermRef.current?.writeln(
+                  '\r\n\x1b[33m[提示] 请在终端配置中填写 SSH 密码，或在运行 pyserver 的用户（常为 root）的 ~/.ssh/ 配置 id_ed25519 并 authorized_keys 到目标账号。\x1b[0m',
+                );
+              }
               setTerminalState('error');
               setStatus(msg.message || '终端认证失败');
               terminalAuthOkRef.current = false;
+              suppressReconnectRef.current = true;
               try {
-                socket.close();
+                socket.close(4000, 'auth-failed');
               } catch {
                 /* ignore */
               }
@@ -1284,7 +1302,11 @@ export function VisualizationPage() {
         const closedByAction =
           suppressReconnectRef.current ||
           manualDisconnectRef.current ||
-          ['manual-disconnect', 'switch-session', 'remove-session', 'page-unmount'].includes(event.reason);
+          event.code === 4000 ||
+          event.reason === 'auth-failed' ||
+          ['manual-disconnect', 'switch-session', 'remove-session', 'page-unmount', 'auth-failed'].includes(
+            event.reason,
+          );
         suppressReconnectRef.current = false;
         if (!closedByAction) scheduleReconnect();
       };
@@ -1861,9 +1883,18 @@ export function VisualizationPage() {
         fuzzy: true,
         case_sensitive: false,
         search_in: 'property',
-      })) as { elements?: unknown[]; materials?: unknown[]; error?: string };
+        filters: {
+          structure: structureFilter,
+          method: methodFilter,
+          stability: stabilityFilter,
+          young_min: youngMin || undefined,
+          young_max: youngMax || undefined,
+        },
+      })) as { elements?: unknown[]; materials?: unknown[]; error?: string; mp_source?: string };
       if (page2Res.error) {
         setStatus(`检索异常: ${page2Res.error}`);
+      } else if (page2Res.mp_source === 'cache') {
+        setStatus(`MP-API 超时/不可用，已降级本地缓存 (${elementFormula})`);
       }
       const mysqlRes = (await pythonApi.mysqlReceive({
         element: elementFormula,
@@ -1962,7 +1993,19 @@ export function VisualizationPage() {
           dedup.set(opt.id, opt);
         }
       });
-      const merged = Array.from(dedup.values());
+      const base = Array.from(dedup.values());
+      const merged = base.map((opt) => {
+        if (opt.sourceType !== 'local') return opt;
+        const eLocal = Number(opt.data['杨氏模量E-H'] ?? opt.data['E'] ?? NaN);
+        if (!Number.isFinite(eLocal)) return opt;
+        const mpMatch = base.find((m) => m.sourceType === 'mp');
+        if (!mpMatch) return opt;
+        const eMp = Number(mpMatch.data['杨氏模量E-H'] ?? mpMatch.data['E'] ?? NaN);
+        if (!Number.isFinite(eMp) || eMp === 0) return opt;
+        const pct = (Math.abs(eLocal - eMp) / Math.abs(eMp)) * 100;
+        const deviationLevel = (pct <= 5 ? 'good' : pct <= 15 ? 'warn' : 'bad') as MaterialOption['deviationLevel'];
+        return { ...opt, deviationLevel, deviationPct: Math.round(pct * 10) / 10 };
+      });
       const requiredSymbols = Array.from(new Set(droppedSymbols));
       const matched = merged.filter((opt) => matchesSelectedSymbols(opt, requiredSymbols));
       setMaterialOptions(matched);
@@ -2484,6 +2527,22 @@ export function VisualizationPage() {
                             </label>
                           </div>
                           <div className="viz-terminal-import-actions row">
+                            <button type="button" className="btn secondary" onClick={() => injectTerminalCommand('vasp_std > vasp_relax.log 2>&1')}>
+                              弛豫计算
+                            </button>
+                            <button type="button" className="btn secondary" onClick={() => injectTerminalCommand('vasp_std > vasp_static.log 2>&1')}>
+                              静态计算
+                            </button>
+                            <button type="button" className="btn secondary" onClick={async () => {
+                              try {
+                                const res = await pythonApi.outcarTail(remoteCwd === '~' ? '.' : remoteCwd);
+                                setOutcarPreview(String((res as { tail?: string }).tail ?? JSON.stringify(res)));
+                              } catch (e) {
+                                setOutcarPreview(`读取失败: ${(e as Error).message}`);
+                              }
+                            }}>
+                              查看 OUTCAR 尾部
+                            </button>
                             <button type="button" className="btn" onClick={() => runVaspImportPreset('scan_stress')}>
                               提交审核 · 应力-应变
                             </button>
@@ -2497,6 +2556,9 @@ export function VisualizationPage() {
                               仅检验（--dry-run，不入队）
                             </button>
                           </div>
+                          {outcarPreview ? (
+                            <pre className="viz-outcar-preview">{outcarPreview.slice(-4000)}</pre>
+                          ) : null}
                         </div>
                       ) : null}
                       <div className="viz-terminal-console-body">
@@ -2635,6 +2697,44 @@ export function VisualizationPage() {
                 <option value="mp">MP-API</option>
               </select>
             </label>
+            <div className="row">
+              <label className="field">
+                结构
+                <select value={structureFilter} onChange={(e) => setStructureFilter(e.target.value as StructureFilter)}>
+                  <option value="all">全部</option>
+                  <option value="fcc">fcc</option>
+                  <option value="bcc">bcc</option>
+                  <option value="hcp">hcp</option>
+                </select>
+              </label>
+              <label className="field">
+                计算方法
+                <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value as MethodFilter)}>
+                  <option value="all">全部</option>
+                  <option value="stress_strain">应力-应变</option>
+                  <option value="energy_strain">能量-应变</option>
+                </select>
+              </label>
+              <label className="field">
+                稳定性
+                <select value={stabilityFilter} onChange={(e) => setStabilityFilter(e.target.value as StabilityFilter)}>
+                  <option value="all">全部</option>
+                  <option value="passed">通过</option>
+                  <option value="failed">未通过</option>
+                  <option value="review">需复核</option>
+                </select>
+              </label>
+            </div>
+            <div className="row">
+              <label className="field">
+                E-H 最小 (GPa)
+                <input value={youngMin} onChange={(e) => setYoungMin(e.target.value)} placeholder="可选" />
+              </label>
+              <label className="field">
+                E-H 最大 (GPa)
+                <input value={youngMax} onChange={(e) => setYoungMax(e.target.value)} placeholder="可选" />
+              </label>
+            </div>
             <label className="field">
               筛选材料
               <input
@@ -2656,6 +2756,7 @@ export function VisualizationPage() {
                 {pickerMaterials.map((item) => (
                   <option key={item.id} value={item.id}>
                     {buildMaterialPickerLabel(item)}
+                    {item.deviationPct != null ? ` · Δ${item.deviationPct}%` : ''}
                   </option>
                 ))}
               </select>
@@ -2672,6 +2773,12 @@ export function VisualizationPage() {
                     <div className="search-kv"><span className="search-k">化学式</span><span className="search-v">{selectedCoreMetrics.formulaPretty}</span></div>
                   ) : null}
                   <div className="search-kv"><span className="search-k">数据来源</span><span className="search-v">{selectedCoreMetrics.source}</span></div>
+                  {selectedMaterial?.deviationPct != null ? (
+                    <div className={`search-kv deviation-${selectedMaterial.deviationLevel ?? 'warn'}`}>
+                      <span className="search-k">与 MP 相对误差</span>
+                      <span className="search-v">{selectedMaterial.deviationPct}%</span>
+                    </div>
+                  ) : null}
                   <div className="search-kv"><span className="search-k">晶体结构</span><span className="search-v">{selectedCoreMetrics.structure}</span></div>
                   <div className="search-kv"><span className="search-k">晶格常数</span><span className="search-v">{selectedCoreMetrics.latticeText}</span></div>
                   <div className="search-kv"><span className="search-k">弹性常数 C11</span><span className="search-v">{selectedCoreMetrics.c11}</span></div>
