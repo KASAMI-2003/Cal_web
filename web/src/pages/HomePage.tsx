@@ -106,7 +106,7 @@ export function HomePage() {
   const [homeSearchResult, setHomeSearchResult] = useState('');
 
   useEffect(() => {
-    document.title = '基本物性集成计算平台';
+    document.title = '金属弹性性质集成平台';
   }, []);
 
   useEffect(() => {
@@ -206,21 +206,45 @@ export function HomePage() {
           <div className="home-main-box">
             <div className="home-essential-box motion-fade-up motion-card-lift">
               <div className="home-project-content">
-                <h1 className="home-project-title motion-title-shimmer">基于AI的基本物性集成计算平台</h1>
+                <h1 className="home-project-title motion-title-shimmer">金属弹性性质集成平台</h1>
+                <p className="home-project-subtitle">
+                  An Integrated Platform of Elastic Properties for Metals
+                </p>
                 <h2>项目简介</h2>
                 <p>
-                  作为强有力的工具，机器学习已经广泛应用于工业设计和科学研究领域当中。机器学习作为人工智能领域的重要分支之一，其特点是以数据为基础，能够对收集到的数据进行分析，实现对目标的高精度预测。就科学研究而言，早在20年前，机器学习与统计物理已有诸多的交集，典型的如团簇扩展方法，广泛应用于合金的性能预测。
+                  金属弹性常数是连接晶体微观结构与宏观力学响应的核心物理量。针对当前弹性性质计算方法不统一、计算结果分散、跨来源对比困难、分析流程难以闭环等问题，本课题围绕金属单质弹性常数的第一性原理计算与 Web 集成平台开展研究。
                 </p>
                 <p>
-                  本项目拟计算物理定律及以高通量计算为基础，采用AI下的机器学习技术，以统一研究目标(如特种合金)的基本物性为对象，构建集成计算平台，实现数据的集中与融合，进而，利用数据同化技术，实现不同时间尺度数据间的桥接，从而，对研究目标系统进行全面的高精度模拟与预测。
+                  计算方面，采用 VASP 在 DFT-PAW-PBE 框架下对 Li、Na、Sc、Ti、V、Ni、Cu、Zn、Mo、Rh 等 20 余种纯金属开展弹性常数计算，并行采用应力-应变法与能量-应变法，经 Voigt-Reuss-Hill 平均得到多晶模量，并以 Born 稳定性判据进行力学稳定性检验。
+                </p>
+                <p>
+                  平台方面，采用 Python + TypeScript/React + Rust（Actix-web）三层架构，以 MySQL 统一存储弹性数据与计算元数据，实现多源检索、三维晶体结构可视化、曲线拟合与 HTEM 半解析建模分析，支持 VASP 单元素数据入库审核、浏览器内远程终端及温压-成分空间各向异性曲面实时渲染。
                 </p>
                 <h2>选题背景</h2>
                 <p>
-                  机器学习包含了用于大量数据处理任务的广泛算法和建模工具，近年来受到了大多数学科从业人员的高度关注。在ML技术在工业应用中兴起的同时，ML在基础研究中的潜力越来越不可忽视，物理学也不例外。而ML和物理学都有一些共同的方法和目标，例如物理本质上推动的ML概念发展、机器学习技术在物理学若干领域的应用以及这两个领域之间的交叉融合等。
+                  VASP、Quantum ESPRESSO 等程序已产出大量弹性数据，Materials Project、AFLOW 等开放数据库亦提供了检索与 API 服务。然而课题组内部常见的工作方式仍是：计算结果分散存放于各次任务文件夹，文献数据靠手工摘录，趋势对比与可视化在 Excel 或脚本中离线完成——数据量增大后，检索效率、版本追溯与跨来源对比均成为瓶颈。
                 </p>
                 <p>
-                  本项目拟计算物理定律及以高通量计算为基础，采用AI下的机器学习技术，以统一研究目标的基本物性为对象，构建集成计算平台，实现数据的集中与融合。通过网络连接服务器，调用服务器中相关程序与数据库进行有序高效、集成化的计算。在此基础上，构建自来纯物理规律的去噪数据的数据集；同时，收集实验数据，建立数据模型和可信的数据库存，搭建一个计算服务平台，为物理实体构建孪生数据库提供可行的集成计算工程平台。
+                  本平台的定位是工程载体：以金属弹性为第一性物理对象，在入库前施加 Born/Mouhat 稳定性约束与双方法交叉校验，实现「VASP/HTEM 计算 → 数据治理 → 交互分析」闭环，为金属弹性数据的专题化汇聚、物理一致性约束与交互式分析提供可检索、可展示、可交互的使用环境。
                 </p>
+                <h2>平台核心模块</h2>
+                <ul className="home-module-list">
+                  <li>
+                    <strong>多源检索</strong>：本地 MySQL 物性库与 Materials Project 并联查询，支持晶系、计算方法与稳定性筛选
+                  </li>
+                  <li>
+                    <strong>可视化分析</strong>：元素周期表交互检索、弹性矩阵展示、Three.js 晶体结构渲染、SSH 远程终端
+                  </li>
+                  <li>
+                    <strong>数据治理</strong>：VASP 输出自动解析、Born/Mouhat 检验、MARE 标注与管理员四步 QC 审批入库
+                  </li>
+                  <li>
+                    <strong>数字孪生</strong>：HTEM SAM 半解析外推，实时渲染杨氏模量 E、最大泊松比与纵波声速各向异性曲面（可调 T、P）
+                  </li>
+                  <li>
+                    <strong>数据拟合</strong>：多项式/指数/对数/正弦曲线拟合，结果可关联至化合物记录
+                  </li>
+                </ul>
               </div>
             </div>
             <div className="home-sec-box motion-fade-up motion-delay-2 motion-card-lift">
@@ -451,8 +475,9 @@ export function HomePage() {
               <div className="home-focus-item">
                 <h4>计算方法对比</h4>
                 <ul>
-                  <li>应力-应变方法：适用于小应变范围，计算效率高</li>
-                  <li>能量-应变方法：适用于大应变范围，可捕捉非线性弹性行为</li>
+                  <li>应力-应变法：±0.01 小应变，线性拟合应力张量，收敛敏感但实现直接</li>
+                  <li>能量-应变法：−0.02～+0.02 五点拟合能量二次项，与应力法交叉校验</li>
+                  <li>双方法一致性良好者入库；偏差超限或违反 Born 判据者自动退回</li>
                 </ul>
               </div>
               <div className="home-focus-item">
@@ -478,7 +503,9 @@ export function HomePage() {
           <h2 className="home-section-title">辅助文档</h2>
           <div className="home-doc-content home-doc-content--user">
             <h3>使用方法</h3>
-            <p>登录后进入「可视化网页」：拖动周期表元素检索本地库与 MP；「数据录入」提交审核；「数据拟合」可关联化合物记录。</p>
+            <p>
+              注册登录后，进入「可视化网页」拖动周期表元素检索本地库与 MP，查看弹性矩阵与 3D 晶格；「数据录入」或终端提交 VASP 结果待审；「数据拟合」完成趋势外推并关联化合物；「弹性孪生可视化」体验 HTEM 各向异性曲面。
+            </p>
             <h4>可视化网页（主要功能）</h4>
             <div className="home-image-placeholder">
               <img src="/img/doc/visual.jpg" alt="可视化界面" className="home-doc-image" />
