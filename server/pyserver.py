@@ -687,17 +687,18 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 qs = parse_qs(parsed.query)
                 query_element = (qs.get('element') or [None])[0]
                 query_num = (qs.get('num_element') or [None])[0]
+                query_material_id = (qs.get('material_id') or [None])[0]
                 req_element = (query_element or element or '').strip()
                 try:
                     req_num_element = int(query_num) if query_num is not None else int(num_element)
                 except (TypeError, ValueError):
                     req_num_element = num_element
                 logging.info(
-                    "Getting data for element: %s, num_element: %s (query=%s, global=%s)",
-                    req_element, req_num_element, query_element, element,
+                    "Getting data for element: %s, num_element: %s, material_id: %s (query=%s, global=%s)",
+                    req_element, req_num_element, query_material_id, query_element, element,
                 )
 
-                imf_list = get_data(req_element, req_num_element)
+                imf_list = get_data(req_element, req_num_element, material_id=query_material_id)
                 imf_list.append(f'当前查询: {req_element} (元素数量: {req_num_element})')
 
                 self.send_response(200)
@@ -957,20 +958,32 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             elif path == '/mysql_receive':
                 element = data.get('element', '')
                 text = data.get('text', '')
-
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                imf_list, db_meta = data_in_mysql(element, text)
-                db_materials = None
-                if imf_list is None or (isinstance(imf_list, list) and all(v is None for v in imf_list)):
-                    imf_list, db_meta, db_materials = data_in_u_nb_materials(element, text)
-                response = {
-                    'message': _to_json_serializable(imf_list) if imf_list is not None else None,
-                    'db_meta': _to_json_serializable(db_meta) if db_meta is not None else None,
-                    'db_materials': _to_json_serializable(db_materials) if db_materials else None,
-                }
-                self.wfile.write(json.dumps(response).encode('utf-8'))
+                try:
+                    imf_list, db_meta = data_in_mysql(element, text)
+                    db_materials = None
+                    if imf_list is None or (isinstance(imf_list, list) and all(v is None for v in imf_list)):
+                        imf_list, db_meta, db_materials = data_in_u_nb_materials(element, text)
+                    response = {
+                        'message': _to_json_serializable(imf_list) if imf_list is not None else None,
+                        'db_meta': _to_json_serializable(db_meta) if db_meta is not None else None,
+                        'db_materials': _to_json_serializable(db_materials) if db_materials else None,
+                    }
+                    payload = json.dumps(response, ensure_ascii=False, default=str).encode('utf-8')
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except Exception as e:
+                    logging.error("mysql_receive 异常: %s", e)
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(
+                        json.dumps(
+                            {'message': None, 'db_meta': None, 'db_materials': None, 'error': str(e)},
+                            ensure_ascii=False,
+                        ).encode('utf-8')
+                    )
 
             elif path == '/page2_search':
                 q = (data.get('q') or data.get('query') or '').strip()
@@ -978,9 +991,9 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 case_sensitive = data.get('case_sensitive', False)
                 search_in = data.get('search_in', 'name')
                 filters = data.get('filters') or {}
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
+                # 默认同时查本地 + MP（仅列表）；local_only=true 可强制仅本地
+                local_only = bool(data.get('local_only', False))
+                include_mp = not local_only
                 try:
                     result = page2_search_db(
                         q,
@@ -988,12 +1001,20 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                         case_sensitive=case_sensitive,
                         search_in=search_in,
                         filters=filters,
+                        include_mp=include_mp,
                     )
                     safe_result = _to_json_serializable(result)
-                    self.wfile.write(json.dumps(safe_result).encode('utf-8'))
+                    payload = json.dumps(safe_result, ensure_ascii=False, default=str).encode('utf-8')
                 except Exception as e:
                     logging.warning("page2_search 异常: %s", e)
-                    self.wfile.write(json.dumps({"elements": [], "materials": [], "error": str(e)}).encode('utf-8'))
+                    payload = json.dumps(
+                        {"elements": [], "materials": [], "error": str(e)},
+                        ensure_ascii=False,
+                    ).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(payload)
 
             elif path == '/mysql_changeData':
                 from cal_platform.legacy_handlers import handle_mysql_change_data
@@ -1033,7 +1054,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                     mp_lines = []
                     mp_error = None
                     try:
-                        mp_raw = get_data(q or element, num_element)
+                        mp_raw = get_data(q, 1)
                         mp_lines = mp_raw or []
                     except Exception as exc:
                         mp_error = str(exc)
@@ -1236,6 +1257,9 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                         element=(data.get('element') or data.get('symbol') or '').strip() or None,
                         poscar=data.get('poscar') or data.get('poscar_text'),
                         supercell=sc,
+                        space_group_no=data.get('space_group_no'),
+                        notes=data.get('notes'),
+                        material_name=data.get('material_name'),
                     )
 
                     self.send_response(200)
@@ -1544,22 +1568,37 @@ def _mp_search_by_element(mpr, element, fields, limit=None):
     return list(docs) if docs is not None else []
 
 
-def get_data(element, num_element):
+def get_data(element, num_element, material_id=None):
     try:
         logging.info("==================== 开始获取数据 ====================")
-        logging.info(f"请求元素: {element}, 元素数量: {num_element}")
+        logging.info(f"请求元素: {element}, 元素数量: {num_element}, material_id: {material_id}")
 
         with MPRester(_get_mp_api_key()) as mpr:
             chemsys = _build_chemsys_from_element(element)
             logging.info(f"处理后的化学式: {chemsys}")
 
-            try:
-                logging.info("正在查询 Materials Project API...")
-                docs = _mp_search_by_element(mpr, element, fields=_MP_SUMMARY_FIELDS_FULL, limit=200)
-                logging.info(f"API查询完成，获取到 {len(docs)} 条记录")
-            except Exception as api_error:
-                logging.error(f"MP-API请求失败: {str(api_error)}")
-                return [f"MP-API请求失败: {str(api_error)}"]
+            docs = []
+            if material_id:
+                mid = str(material_id).strip()
+                if mid and not mid.startswith('mp-'):
+                    mid = f'mp-{mid}'
+                logging.info("正在查询 Materials Project API（单条）: %s", mid)
+                try:
+                    docs = list(
+                        mpr.materials.summary.search(material_ids=[mid], fields=_MP_SUMMARY_FIELDS_FULL)
+                    )
+                except Exception as api_error:
+                    logging.error(f"MP-API单条请求失败: {str(api_error)}")
+                    return [f"MP-API请求失败: {str(api_error)}"]
+                logging.info("单条 API 查询完成，获取到 %d 条记录", len(docs))
+            else:
+                try:
+                    logging.info("正在查询 Materials Project API...")
+                    docs = _mp_search_by_element(mpr, element, fields=_MP_SUMMARY_FIELDS_FULL, limit=200)
+                    logging.info(f"API查询完成，获取到 {len(docs)} 条记录")
+                except Exception as api_error:
+                    logging.error(f"MP-API请求失败: {str(api_error)}")
+                    return [f"MP-API请求失败: {str(api_error)}"]
             
             if not docs:
                 logging.info("未找到相关数据")
@@ -2120,6 +2159,9 @@ def _to_json_serializable(obj):
     """将 Decimal、datetime、numpy 标量等转为 JSON 可序列化类型"""
     from decimal import Decimal
     from datetime import date, datetime
+    from enum import Enum
+    if isinstance(obj, Enum):
+        return obj.value if isinstance(obj.value, (str, int, float, bool)) else str(obj.value)
     if isinstance(obj, Decimal):
         return float(obj)
     try:
@@ -2162,10 +2204,10 @@ def _page2_build_where(cols, q, fuzzy, case_sensitive, numeric_cols=None):
     return " OR ".join(conditions), params
 
 
-def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", filters=None):
+def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", filters=None, include_mp=True):
     """
-    Page2 检索：在 element_inf 和 materials 中搜索。
-    filters: {structure, method, young_min, young_max, stability}
+    Page2 检索：在 element_inf 和 materials 中搜索；默认同时检索 MP（仅列表，不算物性）。
+    include_mp: False 时跳过 MP；MP 不可用时自动降级为 cache 或 empty。
     返回: { "elements": [...], "materials": [...], "mp_source"?: str }
     """
     from cal_platform.search_filters import apply_search_filters
@@ -2175,6 +2217,11 @@ def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", f
     if not query or len(query) < 1:
         return {"elements": elements, "materials": materials}
     q = str(query).strip()
+    elem_exact = None
+    if _looks_like_element_query(q) and '-' not in q:
+        elem_match = re.fullmatch(r'(\d*)([A-Za-z]+)', q)
+        if elem_match:
+            elem_exact = elem_match.group(2)
     # 1. element_inf
     try:
         try:
@@ -2196,9 +2243,16 @@ def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", f
             )
         if mydb.is_connected():
             cur = mydb.cursor(dictionary=True)
-            if search_in == "name":
+            if elem_exact:
+                cur.execute("SELECT * FROM element_inf WHERE 元素 = %s", (elem_exact,))
+                rows = cur.fetchall()
+            elif search_in == "name":
                 elem_cols = ["元素"]
                 elem_numeric = set()
+                where_clause, where_params = _page2_build_where(elem_cols, q, fuzzy, case_sensitive, elem_numeric)
+                sql = "SELECT * FROM element_inf WHERE {}".format(where_clause)
+                cur.execute(sql, where_params)
+                rows = cur.fetchall()
             else:
                 cur.execute("SHOW COLUMNS FROM element_inf")
                 rows_cols = cur.fetchall()
@@ -2217,10 +2271,10 @@ def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", f
                     elem_cols = ["元素", "晶体结构"]
                 num_types = ("int", "decimal", "float", "double", "real", "numeric")
                 elem_numeric = {c for c in elem_cols if any(t in type_map.get(c, "") for t in num_types)}
-            where_clause, where_params = _page2_build_where(elem_cols, q, fuzzy, case_sensitive, elem_numeric)
-            sql = "SELECT * FROM element_inf WHERE {}".format(where_clause)
-            cur.execute(sql, where_params)
-            rows = cur.fetchall()
+                where_clause, where_params = _page2_build_where(elem_cols, q, fuzzy, case_sensitive, elem_numeric)
+                sql = "SELECT * FROM element_inf WHERE {}".format(where_clause)
+                cur.execute(sql, where_params)
+                rows = cur.fetchall()
             for r in rows:
                 if r:
                     elements.append(_to_json_serializable(dict(r)))
@@ -2239,44 +2293,63 @@ def page2_search_db(query, fuzzy=True, case_sensitive=False, search_in="name", f
         )
         if mydb.is_connected():
             cur = mydb.cursor(dictionary=True)
-            if search_in == "name":
+            if elem_exact:
+                cur.execute(
+                    "SELECT id, material_name, u_at_pct, nb_at_pct, space_group_no, a, b, c, notes, created_at, data_source "
+                    "FROM materials WHERE material_name LIKE %s LIMIT %s",
+                    (f"%{elem_exact}%", 100),
+                )
+                rows = cur.fetchall()
+                for r in rows:
+                    if r:
+                        materials.append(_to_json_serializable(dict(r)))
+            elif search_in == "name":
                 mat_cols = ["material_name"]
                 mat_numeric = set()
             else:
                 mat_cols = ["material_name", "u_at_pct", "nb_at_pct", "space_group_no", "a", "b", "c", "notes", "data_source"]
                 mat_numeric = {"u_at_pct", "nb_at_pct", "space_group_no", "a", "b", "c"}
-            where_clause, where_params = _page2_build_where(mat_cols, q, fuzzy, case_sensitive, mat_numeric)
-            where_params.append(100)
-            sql = "SELECT id, material_name, u_at_pct, nb_at_pct, space_group_no, a, b, c, notes, created_at, data_source FROM materials WHERE {} LIMIT %s".format(where_clause)
-            cur.execute(sql, where_params)
-            rows = cur.fetchall()
-            for r in rows:
-                if r:
-                    materials.append(_to_json_serializable(dict(r)))
+            if not elem_exact:
+                where_clause, where_params = _page2_build_where(mat_cols, q, fuzzy, case_sensitive, mat_numeric)
+                where_params.append(100)
+                sql = "SELECT id, material_name, u_at_pct, nb_at_pct, space_group_no, a, b, c, notes, created_at, data_source FROM materials WHERE {} LIMIT %s".format(where_clause)
+                cur.execute(sql, where_params)
+                rows = cur.fetchall()
+                for r in rows:
+                    if r:
+                        materials.append(_to_json_serializable(dict(r)))
             cur.close()
             mydb.close()
     except Exception as e:
         logging.warning("page2_search materials: %s", e)
 
-    # 3. Materials Project（带缓存降级）
-    mp_materials = []
-    mp_source = 'empty'
-    try:
-        from cal_platform.mp_cache import search_mp_with_fallback
+    mp_source = 'skipped'
+    if include_mp:
+        from cal_platform.mp_cache import load_cache, save_cache
 
-        def _mp_fn():
-            return page2_search_mp(q, fuzzy, case_sensitive, search_in)
-
-        mp_materials, mp_source = search_mp_with_fallback(q, _mp_fn, search_in)
-    except Exception as e:
-        logging.warning("page2_search mp: %s", e)
+        mp_materials = []
+        mp_source = 'empty'
         try:
             mp_materials = page2_search_mp(q, fuzzy, case_sensitive, search_in)
-            mp_source = 'live'
-        except Exception as e2:
-            logging.warning("page2_search mp fallback: %s", e2)
+            if mp_materials:
+                mp_source = 'live'
+                try:
+                    save_cache(q, mp_materials)
+                except Exception as cache_err:
+                    logging.warning("page2_search mp cache save: %s", cache_err)
+        except Exception as e:
+            logging.warning("page2_search mp live: %s", e)
 
-    materials.extend(mp_materials)
+        if not mp_materials:
+            cached = load_cache(q)
+            if cached:
+                mp_materials = cached
+                mp_source = 'cache'
+
+        if not mp_materials:
+            mp_source = 'unavailable'
+        materials.extend(mp_materials)
+
     filtered = apply_search_filters(elements, materials, filters)
     filtered['mp_source'] = mp_source
     return filtered
@@ -2333,7 +2406,8 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
                     mid = getattr(doc, "material_id", None) or getattr(doc, "mpid", None)
                     formula = getattr(doc, "formula_pretty", "") or ""
                     sym = getattr(doc, "symmetry", None)
-                    crystal = sym.crystal_system if sym and hasattr(sym, "crystal_system") else None
+                    crystal_raw = sym.crystal_system if sym and hasattr(sym, "crystal_system") else None
+                    crystal = str(crystal_raw) if crystal_raw is not None else None
                     a = b = c = None
                     if hasattr(doc, "structure") and doc.structure and hasattr(doc.structure, "lattice"):
                         a = round(doc.structure.lattice.a, 5)

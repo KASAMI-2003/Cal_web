@@ -160,6 +160,9 @@ export interface CreateLatticePictureRequest {
   poscar?: string;
   poscar_text?: string;
   supercell?: [number, number, number];
+  space_group_no?: number;
+  notes?: string;
+  material_name?: string;
 }
 
 export interface CreateLatticePictureResponse {

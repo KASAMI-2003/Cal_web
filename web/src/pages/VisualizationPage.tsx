@@ -240,12 +240,12 @@ function matchesSelectedSymbols(option: MaterialOption, selectedSymbols: string[
   if (selectedSymbols.length === 0) {
     return true;
   }
+  if (option.sourceType === 'mp') {
+    return true;
+  }
   const selectedSet = new Set(selectedSymbols);
   const candidateSet = getCandidateElementSet(option);
   if (candidateSet.size === 0) {
-    return false;
-  }
-  if (candidateSet.size !== selectedSet.size) {
     return false;
   }
   return Array.from(selectedSet).every((symbol) => candidateSet.has(symbol));
@@ -284,10 +284,26 @@ function parseLatticeAxes(data: Record<string, unknown>): { a: number | null; b:
   };
 }
 
-function inferLatticeType(structure: string): 'fcc' | 'bcc' | 'hcp' {
-  const lower = structure.toLowerCase();
-  if (lower.includes('body') || lower.includes('体心')) return 'bcc';
-  if (lower.includes('hex') || lower.includes('六方')) return 'hcp';
+function inferLatticeType(data: Record<string, unknown>): 'fcc' | 'bcc' | 'hcp' | 'orthogonal' {
+  const structure = String(data.晶体结构 ?? data.structure ?? '');
+  const notes = String(data.notes ?? '');
+  const materialName = String(data.material_name ?? data.db_formula ?? '');
+  const spaceGroupNo = parseFloatLike(data.space_group_no);
+  const hints = [structure, notes, materialName, spaceGroupNo != null ? `spacegroup=${spaceGroupNo}` : '']
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (/\bbcc\b|体心|body[- ]?centered|im[- ]?3m|ia[- ]?3m/.test(hints)) return 'bcc';
+  if (/\bhcp\b|hexagonal|六方|wurtzite|p6/.test(hints)) return 'hcp';
+  if (/\bfcc\b|面心|face[- ]?centered|fm[- ]?3m|fd[- ]?3m/.test(hints)) return 'fcc';
+  if (spaceGroupNo === 229 || spaceGroupNo === 211) return 'bcc';
+  if (spaceGroupNo === 225 || spaceGroupNo === 227) return 'fcc';
+  if (spaceGroupNo != null && spaceGroupNo >= 168 && spaceGroupNo <= 194) return 'hcp';
+  if (/orthorhombic|tetragonal|monoclinic|triclinic|斜方|四方|单斜|cmcm/.test(hints)) return 'orthogonal';
+  if (/hex|六方|hcp/.test(hints)) return 'hcp';
+  if (/body|体心/.test(hints)) return 'bcc';
+  if (/cubic|立方/.test(hints)) return 'fcc';
   return 'fcc';
 }
 
@@ -428,25 +444,6 @@ function buildMaterialPickerLabel(option: MaterialOption): string {
   const elemSeg = elems ? `[${elems}] ` : '';
   const formulaSeg = formula || option.title || '—';
   return `${elemSeg}${formulaSeg} · ${idPart}`;
-}
-
-function materialMatchesPickerQuery(option: MaterialOption, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const idTokens =
-    option.sourceType === 'mp'
-      ? [option.id, normalizeMpApiId(option.id)]
-      : [option.id, formatMaterialDisplayId(option)];
-  const hay = [
-    ...idTokens,
-    getMaterialFormulaPretty(option),
-    option.title,
-    option.tag,
-    formatMaterialElementsSummary(option.data),
-  ]
-    .join(' ')
-    .toLowerCase();
-  return hay.includes(q);
 }
 
 function buildSearchCardSubtitle(option: MaterialOption): string {
@@ -592,6 +589,136 @@ function preventBrowserStealingTerminalKeys(ev: KeyboardEvent): boolean {
   return true;
 }
 
+type WorkflowPhase = 'idle' | 'running' | 'done' | 'error';
+
+function buildMaterialOptionsFromSearch(
+  page2Res: { elements?: unknown[]; materials?: unknown[] },
+  mysqlRes: {
+    message?: unknown[];
+    db_meta?: Record<string, unknown>;
+    db_materials?: Array<Record<string, unknown>>;
+  },
+  elementFormula: string,
+): MaterialOption[] {
+  const options: MaterialOption[] = [];
+
+  (page2Res.elements ?? []).forEach((item, idx) => {
+    const data = item as Record<string, unknown>;
+    const id = normalizeLocalMaterialId(String(data.元素 ?? data.element ?? idx), `element-${idx}`);
+    options.push({
+      id,
+      title: String(data.元素 ?? data.element ?? '元素'),
+      sourceType: 'local',
+      tag: 'element_inf',
+      kind: 'elements',
+      data: { ...data, id },
+    });
+  });
+
+  (page2Res.materials ?? []).forEach((item, idx) => {
+    const data = item as Record<string, unknown>;
+    const isMp = data.source === 'Materials Project' || String(data.data_source ?? '').includes('Materials Project');
+    const id = isMp
+      ? String(data.id ?? `material-${idx}`).startsWith('mp-')
+        ? String(data.id)
+        : `mp-${data.id ?? idx}`
+      : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`);
+    options.push({
+      id,
+      title: String(data.material_name ?? data.id ?? '化合物'),
+      sourceType: isMp ? 'mp' : 'local',
+      tag: isMp ? 'MP' : 'materials',
+      kind: 'materials',
+      data: { ...data, id: isMp ? id : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`) },
+    });
+  });
+
+  (mysqlRes.db_materials ?? []).forEach((item) => {
+    const id = normalizeLocalMaterialId(item.id as string | number | undefined);
+    options.push({
+      id,
+      title: String(item.material_name ?? item.db_formula ?? item.id ?? '本地材料'),
+      sourceType: 'local',
+      tag: 'db_materials',
+      kind: 'materials',
+      data: { ...item, id },
+    });
+  });
+
+  if (mysqlRes.message && mysqlRes.message.some((v) => v !== null)) {
+    options.push({
+      id: 'db-meta',
+      title: String(mysqlRes.db_meta?.formula ?? elementFormula),
+      sourceType: 'local',
+      tag: 'db_meta',
+      kind: 'elements',
+      data: {
+        source: '数据库',
+        晶体结构: mysqlRes.message[0],
+        晶格常数: mysqlRes.message[1],
+        弹性刚度常数C11: mysqlRes.message[2],
+        弹性刚度常数C12: mysqlRes.message[3],
+        '杨氏模量E-H': mysqlRes.message[4],
+        ...mysqlRes.db_meta,
+      },
+    });
+  }
+
+  const dedup = new Map<string, MaterialOption>();
+  options.forEach((opt) => {
+    if (!dedup.has(opt.id)) {
+      dedup.set(opt.id, opt);
+    }
+  });
+  return Array.from(dedup.values());
+}
+
+function applyDeviationMerge(base: MaterialOption[]): MaterialOption[] {
+  return base.map((opt) => {
+    if (opt.sourceType !== 'local') return opt;
+    const eLocal = Number(opt.data['杨氏模量E-H'] ?? opt.data['E'] ?? NaN);
+    if (!Number.isFinite(eLocal)) return opt;
+    const mpMatch = base.find((m) => m.sourceType === 'mp');
+    if (!mpMatch) return opt;
+    const eMp = Number(mpMatch.data['杨氏模量E-H'] ?? mpMatch.data['E'] ?? NaN);
+    if (!Number.isFinite(eMp) || eMp === 0) return opt;
+    const pct = (Math.abs(eLocal - eMp) / Math.abs(eMp)) * 100;
+    const deviationLevel = (pct <= 5 ? 'good' : pct <= 15 ? 'warn' : 'bad') as MaterialOption['deviationLevel'];
+    return { ...opt, deviationLevel, deviationPct: Math.round(pct * 10) / 10 };
+  });
+}
+
+function materialOptionsToSearchCards(options: MaterialOption[]): SearchCardItem[] {
+  return options.map((opt) => ({
+    id: opt.id,
+    kind: opt.kind,
+    sourceType: opt.sourceType,
+    title: getMaterialFormulaPretty(opt) || opt.title,
+    subtitle: buildSearchCardSubtitle(opt),
+    tag: opt.tag,
+    fields: Object.entries(opt.data)
+      .filter(([, value]) => value !== null && value !== undefined && String(value) !== '')
+      .filter(([, value]) => typeof value !== 'object')
+      .map(([key, value]) => ({ key, value: String(value) })),
+  }));
+}
+
+function WorkflowBanner({ phase, kind }: { phase: WorkflowPhase; kind: 'search' | 'compute' }) {
+  if (phase !== 'running') return null;
+  return (
+    <div className={`viz-workflow-banner is-${kind}`} role="status" aria-live="polite">
+      <span className="viz-workflow-spinner" aria-hidden />
+      <div className="viz-workflow-banner-text">
+        <strong>{kind === 'search' ? '检索中' : '计算中'}</strong>
+        <span>{kind === 'search' ? '正在检索本地数据库与 Materials Project（不算物性）…' : '正在计算所选条目物性…'}</span>
+      </div>
+      <div className="viz-workflow-progress" aria-hidden>
+        <span className="viz-workflow-progress-bar" />
+      </div>
+    </div>
+  );
+}
+
 export function VisualizationPage() {
   const auth = getAuthState();
   const [activeTab, setActiveTab] = useState<VizTab>('elements');
@@ -619,6 +746,10 @@ export function VisualizationPage() {
   const [terminalOutput, setTerminalOutput] = useState('');
   const [searchCards, setSearchCards] = useState<SearchCardItem[]>([]);
   const [searchEmptyText, setSearchEmptyText] = useState('');
+  const [searchPhase, setSearchPhase] = useState<WorkflowPhase>('idle');
+  const [computePhase, setComputePhase] = useState<WorkflowPhase>('idle');
+  const [computedMaterialIds, setComputedMaterialIds] = useState<Set<string>>(() => new Set());
+  const materialOptionsRef = useRef<MaterialOption[]>([]);
   const [status, setStatus] = useState('');
   const [sidebarLattice, setSidebarLattice] = useState<LatticeRenderData | null>(null);
   const [sidebarLatticeStatus, setSidebarLatticeStatus] = useState('');
@@ -721,25 +852,14 @@ export function VisualizationPage() {
 
   const filteredSymbolSet = useMemo(() => new Set(filteredElements.map((item) => item.symbol)), [filteredElements]);
 
+  const sidebarMaterialOptions = useMemo(() => materialOptions, [materialOptions]);
+
   const filteredMaterials = useMemo(() => {
     if (sourceFilter === 'all') {
       return materialOptions;
     }
     return materialOptions.filter((item) => item.sourceType === sourceFilter);
   }, [materialOptions, sourceFilter]);
-
-  const pickerMaterials = useMemo(() => {
-    const q = materialPickerQuery.trim().toLowerCase();
-    let list = q ? filteredMaterials.filter((opt) => materialMatchesPickerQuery(opt, q)) : filteredMaterials;
-    const selId = selectedMaterialId;
-    if (selId && !list.some((o) => o.id === selId)) {
-      const sel = filteredMaterials.find((o) => o.id === selId);
-      if (sel) {
-        list = [sel, ...list];
-      }
-    }
-    return list;
-  }, [filteredMaterials, materialPickerQuery, selectedMaterialId]);
 
   const visibleSearchCards = useMemo(() => {
     let list = searchCards;
@@ -768,6 +888,10 @@ export function VisualizationPage() {
       .filter(([, value]) => typeof value !== 'object')
       .map(([key, value]) => ({ key, value: String(value) }));
   }, [selectedMaterial]);
+
+  useEffect(() => {
+    materialOptionsRef.current = materialOptions;
+  }, [materialOptions]);
 
   const selectedCoreMetrics = useMemo(() => {
     if (!selectedMaterial) {
@@ -1220,11 +1344,32 @@ export function VisualizationPage() {
     if (!elementFormula) {
       setMaterialOptions([]);
       setSelectedMaterialId('');
+      setSearchCards([]);
+      setSearchEmptyText('');
+      setComputedMaterialIds(new Set());
+      setSearchPhase('idle');
+      setComputePhase('idle');
       setSidebarLattice(null);
+      setSidebarLatticeStatus('');
       return;
     }
-    void fetchBarMaterials();
+    setMaterialOptions([]);
+    setSelectedMaterialId('');
+    setSearchCards([]);
+    setSearchEmptyText('');
+    setComputedMaterialIds(new Set());
+    setSearchPhase('idle');
+    setComputePhase('idle');
+    setSidebarLattice(null);
+    setSidebarLatticeStatus('');
+    setStatus(`已选择 ${elementFormula}，请点击「检索」`);
   }, [elementFormula]);
+
+  useEffect(() => {
+    if (!selectedMaterialId || searchPhase !== 'done') return;
+    if (computedMaterialIds.has(selectedMaterialId)) return;
+    void computeMaterialDetails(selectedMaterialId);
+  }, [selectedMaterialId, searchPhase]);
 
   useEffect(() => {
     setSidebarLattice(null);
@@ -2041,14 +2186,18 @@ export function VisualizationPage() {
     }
 
     try {
-      const structure = String(data.晶体结构 ?? '');
-      const latticeType = inferLatticeType(structure);
+      const structure = String(data.晶体结构 ?? data.structure ?? '');
+      const latticeType = inferLatticeType(data);
       const generated = await pythonApi.createLatticePicture({
         lattice_const: latticeType,
+        structure,
         lattice_a: axes.a ?? undefined,
         lattice_b: axes.b ?? undefined,
         lattice_c: axes.c ?? undefined,
         element: primaryElement,
+        space_group_no: parseFloatLike(data.space_group_no) ?? undefined,
+        notes: String(data.notes ?? '') || undefined,
+        material_name: String(data.material_name ?? data.db_formula ?? selectedMaterial!.title) || undefined,
       });
       const mesh = parseLatticeMeshResponse(generated);
       if (mesh.points.length === 0) {
@@ -2062,8 +2211,9 @@ export function VisualizationPage() {
         elements: mesh.elements,
       });
       const src = generated.source === 'ase_bulk' ? 'ASE bulk' : generated.source ?? 'ASE';
+      const resolvedType = String(generated.structure ?? latticeType).toUpperCase();
       setSidebarLatticeStatus(
-        `${src} 已生成 ${latticeType.toUpperCase()} 原胞（${primaryElement}，a≈${(generated.lattice_a ?? latticeConst).toFixed(3)} Å，${mesh.points.length} 原子）`,
+        `${src} 已生成 ${resolvedType} 原胞（${primaryElement}，a≈${(generated.lattice_a ?? latticeConst).toFixed(3)} Å，${mesh.points.length} 原子）`,
       );
     } catch (error) {
       setSidebarLattice(null);
@@ -2084,22 +2234,27 @@ export function VisualizationPage() {
     setStatus('已清空右侧元素栏');
   }
 
-  async function fetchBarMaterials() {
+  async function searchBarMaterials() {
     if (!elementFormula) {
       return;
     }
+    setSearchPhase('running');
+    setComputePhase('idle');
+    setComputedMaterialIds(new Set());
+    setSelectedMaterialId('');
+    setSidebarLattice(null);
+    setSidebarLatticeStatus('');
+    setSearchCards([]);
+    setSearchEmptyText('');
+    setMaterialOptions([]);
+    setMaterialPickerQuery('');
+    setStatus(`正在检索 ${elementFormula}（本地数据库 + Materials Project，不计算物性）…`);
     try {
-      setSearchCards([]);
-      setSearchEmptyText('');
-      setMaterialOptions([]);
-      setSelectedMaterialId('');
-      setMaterialPickerQuery('');
-      setStatus(`正在检索 ${elementFormula} ...`);
       const page2Res = (await pythonApi.page2Search({
         q: elementFormula,
         fuzzy: true,
         case_sensitive: false,
-        search_in: 'property',
+        search_in: 'name',
         filters: {
           structure: structureFilter,
           method: methodFilter,
@@ -2110,147 +2265,104 @@ export function VisualizationPage() {
       })) as { elements?: unknown[]; materials?: unknown[]; error?: string; mp_source?: string };
       if (page2Res.error) {
         setStatus(`检索异常: ${page2Res.error}`);
-      } else if (page2Res.mp_source === 'cache') {
-        setStatus(`MP-API 超时/不可用，已降级本地缓存 (${elementFormula})`);
       }
-      const mysqlRes = (await pythonApi.mysqlReceive({
-        element: elementFormula,
-        text: '晶体结构,晶格常数,弹性刚度常数C11,C12,杨氏模量E-H',
-      })) as {
+      let mysqlRes: {
         message?: unknown[];
         db_meta?: Record<string, unknown>;
         db_materials?: Array<Record<string, unknown>>;
-      };
-      let mpOptions: MaterialOption[] = [];
+      } = {};
       try {
-        await pythonApi.submitElement({ element: elementFormula, num_element: droppedSymbols.length || 1 });
-        const mpRaw = await pythonApi.queryData(elementFormula, droppedSymbols.length || 1);
-        const mpLines = mpRaw.message ?? [];
-        const mpError = mpLines.find(
-          (line) =>
-            String(line).includes('MP-API请求失败') ||
-            String(line).startsWith('获取数据时出错') ||
-            String(line).startsWith('获取数据时发生错误'),
-        );
-        if (mpError) {
-          setStatus(String(mpError));
-        }
-        mpOptions = parseMpApiMaterials(mpLines);
-      } catch (mpErr) {
-        setStatus(`MP-API 不可用: ${(mpErr as Error).message}`);
+        mysqlRes = (await pythonApi.mysqlReceive({
+          element: elementFormula,
+          text: '晶体结构,晶格常数,弹性刚度常数C11,C12,杨氏模量E-H',
+        })) as typeof mysqlRes;
+      } catch (mysqlErr) {
+        console.warn('mysql_receive 补充查询失败，已使用 page2_search 结果', mysqlErr);
       }
-      const options: MaterialOption[] = [];
 
-      (page2Res.elements ?? []).forEach((item, idx) => {
-        const data = item as Record<string, unknown>;
-        const id = normalizeLocalMaterialId(String(data.元素 ?? data.element ?? idx), `element-${idx}`);
-        options.push({
-          id,
-          title: String(data.元素 ?? data.element ?? '元素'),
-          sourceType: 'local',
-          tag: 'element_inf',
-          kind: 'elements',
-          data: { ...data, id },
-        });
-      });
-
-      (page2Res.materials ?? []).forEach((item, idx) => {
-        const data = item as Record<string, unknown>;
-        const isMp = data.source === 'Materials Project' || String(data.data_source ?? '').includes('Materials Project');
-        const id = isMp
-          ? String(data.id ?? `material-${idx}`).startsWith('mp-')
-            ? String(data.id)
-            : `mp-${data.id ?? idx}`
-          : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`);
-        options.push({
-          id,
-          title: String(data.material_name ?? data.id ?? '化合物'),
-          sourceType: isMp ? 'mp' : 'local',
-          tag: isMp ? 'MP' : 'materials',
-          kind: 'materials',
-          data: { ...data, id: isMp ? id : normalizeLocalMaterialId(data.id as string | number | undefined, `material-${idx}`) },
-        });
-      });
-
-      (mysqlRes.db_materials ?? []).forEach((item) => {
-        const id = normalizeLocalMaterialId(item.id as string | number | undefined);
-        options.push({
-          id,
-          title: String(item.material_name ?? item.db_formula ?? item.id ?? '本地材料'),
-          sourceType: 'local',
-          tag: 'db_materials',
-          kind: 'materials',
-          data: { ...item, id },
-        });
-      });
-
-      if (mysqlRes.message && mysqlRes.message.some((v) => v !== null)) {
-        options.push({
-          id: 'db-meta',
-          title: String(mysqlRes.db_meta?.formula ?? elementFormula),
-          sourceType: 'local',
-          tag: 'db_meta',
-          kind: 'elements',
-          data: {
-            source: '数据库',
-            晶体结构: mysqlRes.message[0],
-            晶格常数: mysqlRes.message[1],
-            弹性刚度常数C11: mysqlRes.message[2],
-            弹性刚度常数C12: mysqlRes.message[3],
-            '杨氏模量E-H': mysqlRes.message[4],
-            ...mysqlRes.db_meta,
-          },
-        });
-      }
-      options.push(...mpOptions);
-
-      const dedup = new Map<string, MaterialOption>();
-      options.forEach((opt) => {
-        if (!dedup.has(opt.id)) {
-          dedup.set(opt.id, opt);
-        }
-      });
-      const base = Array.from(dedup.values());
-      const merged = base.map((opt) => {
-        if (opt.sourceType !== 'local') return opt;
-        const eLocal = Number(opt.data['杨氏模量E-H'] ?? opt.data['E'] ?? NaN);
-        if (!Number.isFinite(eLocal)) return opt;
-        const mpMatch = base.find((m) => m.sourceType === 'mp');
-        if (!mpMatch) return opt;
-        const eMp = Number(mpMatch.data['杨氏模量E-H'] ?? mpMatch.data['E'] ?? NaN);
-        if (!Number.isFinite(eMp) || eMp === 0) return opt;
-        const pct = (Math.abs(eLocal - eMp) / Math.abs(eMp)) * 100;
-        const deviationLevel = (pct <= 5 ? 'good' : pct <= 15 ? 'warn' : 'bad') as MaterialOption['deviationLevel'];
-        return { ...opt, deviationLevel, deviationPct: Math.round(pct * 10) / 10 };
-      });
+      const base = buildMaterialOptionsFromSearch(page2Res, mysqlRes, elementFormula);
       const requiredSymbols = Array.from(new Set(droppedSymbols));
-      const matched = merged.filter((opt) => matchesSelectedSymbols(opt, requiredSymbols));
+      const matched = base.filter((opt) => matchesSelectedSymbols(opt, requiredSymbols));
+
       setMaterialOptions(matched);
-      if (matched.length > 0) {
-        setSelectedMaterialId(matched[0].id);
+      setSearchCards(materialOptionsToSearchCards(matched));
+      setSearchEmptyText(matched.length === 0 ? `未找到 ${elementFormula} 相关记录` : '');
+      setSearchPhase('done');
+
+      const localCount = matched.filter((item) => item.sourceType === 'local').length;
+      const mpCount = matched.filter((item) => item.sourceType === 'mp').length;
+      if (matched.length === 0) {
+        setStatus(`未找到 ${elementFormula} 相关记录`);
+      } else if (page2Res.mp_source === 'unavailable') {
+        setStatus(`检索完成：共 ${matched.length} 条（本地 ${localCount} 条；MP-API 不可用，已跳过 MP）`);
+      } else if (page2Res.mp_source === 'cache') {
+        setStatus(`检索完成：共 ${matched.length} 条（本地 ${localCount} + MP 缓存 ${mpCount}），请选择一条后计算`);
+      } else {
+        setStatus(`检索完成：共 ${matched.length} 条（本地 ${localCount} + MP ${mpCount}），请选择一条后计算`);
       }
-      setSearchCards(
-        matched.map((opt) => ({
-          id: opt.id,
-          kind: opt.kind,
-          sourceType: opt.sourceType,
-          title: getMaterialFormulaPretty(opt) || opt.title,
-          subtitle: buildSearchCardSubtitle(opt),
-          tag: opt.tag,
-          fields: Object.entries(opt.data)
-            .filter(([, value]) => value !== null && value !== undefined && String(value) !== '')
-            .filter(([, value]) => typeof value !== 'object')
-            .map(([key, value]) => ({ key, value: String(value) })),
-        })),
-      );
-      setSearchEmptyText(matched.length === 0 ? '未找到与所选元素匹配的数据' : '');
-      setStatus(`检索完成：${matched.length} 条匹配数据（${requiredSymbols.join(', ')}）`);
     } catch (error) {
       setMaterialOptions([]);
-      setSelectedMaterialId('');
       setSearchCards([]);
       setSearchEmptyText(`检索失败: ${(error as Error).message}`);
+      setSearchPhase('error');
       setStatus((error as Error).message);
+    }
+  }
+
+  async function computeMaterialDetails(materialId: string) {
+    if (!elementFormula || !materialId) return;
+
+    const selected = materialOptionsRef.current.find((opt) => opt.id === materialId);
+    if (!selected) return;
+
+    if (selected.sourceType === 'local') {
+      setComputePhase('running');
+      setStatus(`正在加载本地条目：${selected.title}…`);
+      setComputedMaterialIds((prev) => new Set(prev).add(materialId));
+      setComputePhase('done');
+      setStatus(`已加载本地数据：${selected.title}`);
+      return;
+    }
+
+    const mpId = normalizeMpApiId(materialId);
+    setComputePhase('running');
+    setStatus(`正在计算 MP 材料 ${mpId} 的物性（单条）…`);
+    try {
+      await pythonApi.submitElement({ element: elementFormula, num_element: droppedSymbols.length || 1 });
+      const mpRaw = await pythonApi.queryData(elementFormula, droppedSymbols.length || 1, mpId);
+      const mpLines = mpRaw.message ?? [];
+      const mpError = mpLines.find(
+        (line) =>
+          String(line).includes('MP-API请求失败') ||
+          String(line).startsWith('获取数据时出错') ||
+          String(line).startsWith('获取数据时发生错误'),
+      );
+      if (mpError) {
+        setComputePhase('error');
+        setStatus(String(mpError));
+        return;
+      }
+      const mpOptions = parseMpApiMaterials(mpLines);
+      const computedOne =
+        mpOptions.find((opt) => normalizeMpApiId(opt.id) === mpId) ?? (mpOptions.length === 1 ? mpOptions[0] : null);
+      if (!computedOne) {
+        setComputePhase('error');
+        setStatus(`未能获取 ${mpId} 的计算结果`);
+        return;
+      }
+
+      const others = materialOptionsRef.current.filter(
+        (opt) => normalizeMpApiId(opt.id) !== normalizeMpApiId(computedOne.id),
+      );
+      const next = applyDeviationMerge([...others, computedOne]);
+      setMaterialOptions(next);
+      setSearchCards(materialOptionsToSearchCards(next));
+      setComputedMaterialIds((prev) => new Set(prev).add(materialId));
+      setComputePhase('done');
+      setStatus(`计算完成：${computedOne.title}（${normalizeMpApiId(computedOne.id)}）`);
+    } catch (error) {
+      setComputePhase('error');
+      setStatus(`计算失败: ${(error as Error).message}`);
     }
   }
 
@@ -2343,7 +2455,7 @@ export function VisualizationPage() {
                     </div>
                   </div>
                 </div>
-                <p className="status">拖拽元素到右侧固定栏，或点击元素直接加入。</p>
+                <p className="status">拖拽元素到右侧固定栏，点击「检索」后在下拉框选择条目并计算。</p>
               </div>
             ) : null}
 
@@ -2351,9 +2463,11 @@ export function VisualizationPage() {
               <section className="panel viz-detail-panel" style={{ marginTop: 12 }}>
                 <h3>详细数据</h3>
                 <p className="viz-detail-intro">
-                  请先在右侧固定栏拖入元素并点击「检索」；在此设置筛选条件并浏览结果。结构 / 计算方法 / 稳定性 / 杨氏模量范围变更后需重新检索。
+                  请先在右侧固定栏拖入元素并点击「检索」；系统将同时查询本地数据库与 MP（不算物性）。在下拉框选择条目后才进行计算。筛选条件变更后需重新检索。
                 </p>
                 <p className="status">当前组合：{elementFormula || '未选择元素'}</p>
+                <WorkflowBanner phase={searchPhase} kind="search" />
+                <WorkflowBanner phase={computePhase} kind="compute" />
 
                 <div className="viz-detail-filters">
                   <label className="field">
@@ -2409,7 +2523,7 @@ export function VisualizationPage() {
                     />
                   </label>
                   <div className="viz-detail-filter-actions">
-                    <button type="button" className="btn" onClick={() => void fetchBarMaterials()} disabled={!elementFormula}>
+                    <button type="button" className="btn" onClick={() => void searchBarMaterials()} disabled={!elementFormula || searchPhase === 'running'}>
                       应用筛选并检索
                     </button>
                   </div>
@@ -2442,7 +2556,7 @@ export function VisualizationPage() {
                     ))}
                   </div>
                 ) : searchCards.length === 0 ? (
-                  <p className="status">请先在右侧固定栏拖入元素并完成检索。</p>
+                  <p className="status">请先在右侧固定栏拖入元素并点击「检索」。</p>
                 ) : null}
               </section>
             ) : null}
@@ -2861,7 +2975,7 @@ export function VisualizationPage() {
           <aside className="viz-legacy-sec-box2">
             <div className="viz-sidebar">
             <h3>固定数据栏</h3>
-            <p>拖入元素、检索材料，并查看可视化与属性摘要。</p>
+            <p>拖入元素后点击「检索」（本地 + MP 列表），选中条目后再计算物性。</p>
             <div
               className={`sidebar-dropzone ${droppedSymbols.length > 0 ? 'sidebar-dropzone-filled' : ''}`}
               onDragOver={(e) => e.preventDefault()}
@@ -2907,31 +3021,40 @@ export function VisualizationPage() {
               <button className="btn secondary" onClick={clearDroppedSymbols}>
                 清空元素
               </button>
-              <button className="btn" onClick={fetchBarMaterials} disabled={!elementFormula}>
+              <button className="btn" onClick={() => void searchBarMaterials()} disabled={!elementFormula || searchPhase === 'running'}>
                 检索
               </button>
             </div>
+            <WorkflowBanner phase={searchPhase} kind="search" />
+            <WorkflowBanner phase={computePhase} kind="compute" />
             <p className="status">当前组合：{elementFormula || '无'}</p>
 
             <label className="field">
               选择数据
               <select
                 value={selectedMaterialId}
-                onChange={(e) => setSelectedMaterialId(e.target.value)}
-                disabled={filteredMaterials.length === 0}
+                onChange={(e) => {
+                  setComputePhase('idle');
+                  setSelectedMaterialId(e.target.value);
+                }}
+                disabled={sidebarMaterialOptions.length === 0 || searchPhase !== 'done'}
               >
-                <option value="">选择材料...</option>
-                {pickerMaterials.map((item) => (
+                <option value="">{searchPhase !== 'done' ? '请先检索…' : '选择材料…'}</option>
+                {sidebarMaterialOptions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {buildMaterialPickerLabel(item)}
+                    {computedMaterialIds.has(item.id) ? ' · 已计算' : ''}
                     {item.deviationPct != null ? ` · Δ${item.deviationPct}%` : ''}
                   </option>
                 ))}
               </select>
             </label>
+            {selectedMaterialId && !computedMaterialIds.has(selectedMaterialId) && computePhase !== 'running' ? (
+              <p className="status viz-workflow-hint">已选择条目，将开始计算…</p>
+            ) : null}
             <div className="sidebar-metrics">
-              <h4>可视化数据</h4>
-              {selectedCoreMetrics ? (
+              <h4>可视化数据{selectedMaterialId && computedMaterialIds.has(selectedMaterialId) ? '' : '（计算后显示完整对比）'}</h4>
+              {selectedCoreMetrics && (computedMaterialIds.has(selectedMaterialId) || selectedMaterial?.sourceType === 'mp') ? (
                 <>
                   <div className="search-kv"><span className="search-k">材料 ID</span><span className="search-v">{selectedCoreMetrics.listingId}</span></div>
                   {selectedCoreMetrics.elementsSummary ? (
@@ -2953,10 +3076,12 @@ export function VisualizationPage() {
                   <div className="search-kv"><span className="search-k">弹性常数 C12</span><span className="search-v">{selectedCoreMetrics.c12}</span></div>
                   <div className="search-kv"><span className="search-k">杨氏模量 E-H</span><span className="search-v">{selectedCoreMetrics.young}</span></div>
                 </>
+              ) : selectedMaterialId && searchPhase === 'done' ? (
+                <p className="status">{computePhase === 'running' ? '正在计算物性…' : '请选择条目并完成计算后显示关键指标'}</p>
               ) : (
-                <p className="status">请选择材料后显示关键可视化数据</p>
+                <p className="status">请先查询并选择材料</p>
               )}
-              <button className="btn secondary" onClick={() => void generateSidebarLattice(false)} disabled={!selectedMaterial} style={{ marginTop: 8 }}>
+              <button className="btn secondary" onClick={() => void generateSidebarLattice(false)} disabled={!selectedMaterial || !computedMaterialIds.has(selectedMaterialId)} style={{ marginTop: 8 }}>
                 ASE 生成原胞（按材料晶格常数）
               </button>
               <button

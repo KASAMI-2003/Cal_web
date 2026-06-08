@@ -35,7 +35,7 @@ def save_cache(query: str, materials: list[dict[str, Any]]) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = _cache_path(query)
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump({'ts': time.time(), 'query': query, 'materials': materials}, f, ensure_ascii=False)
+        json.dump({'ts': time.time(), 'query': query, 'materials': materials}, f, ensure_ascii=False, default=str)
 
 
 def search_mp_with_fallback(query: str, search_fn, search_in: str = 'property') -> tuple[list, str]:
@@ -58,7 +58,10 @@ def search_mp_with_fallback(query: str, search_fn, search_in: str = 'property') 
             if hasattr(signal, 'SIGALRM'):
                 signal.setitimer(signal.ITIMER_REAL, 0)
         if results:
-            save_cache(query, results)
+            try:
+                save_cache(query, results)
+            except Exception:
+                pass
             return results, 'live'
     except Exception:
         pass

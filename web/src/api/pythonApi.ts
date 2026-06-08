@@ -37,13 +37,16 @@ export const pythonApi = {
       baseUrl: pythonBaseUrl,
       headers: withAuth(),
     }),
-  queryData: (element?: string, numElement?: number) => {
+  queryData: (element?: string, numElement?: number, materialId?: string) => {
     const params = new URLSearchParams();
     if (element) {
       params.set('element', element);
     }
     if (numElement !== undefined) {
       params.set('num_element', String(numElement));
+    }
+    if (materialId) {
+      params.set('material_id', materialId);
     }
     const query = params.toString();
     return requestJson<ApiDataResponse>(query ? `/api/data?${query}` : '/api/data', { baseUrl: pythonBaseUrl });
@@ -56,6 +59,8 @@ export const pythonApi = {
     case_sensitive?: boolean;
     search_in?: string;
     filters?: Record<string, unknown>;
+    /** true = 仅查本地 MySQL，不调用 MP */
+    local_only?: boolean;
   }) => requestJson('/page2_search', { method: 'POST', body, baseUrl: pythonBaseUrl }),
   homeSearch: (body: { q: string; filters?: Record<string, unknown> }) =>
     requestJson('/api/home_search', { method: 'POST', body, baseUrl: pythonBaseUrl, headers: withAuth() }),
