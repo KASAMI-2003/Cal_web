@@ -8,28 +8,22 @@ import { pythonApi } from '../api/pythonApi';
 import { openTerminalSocket } from '../ws/terminalWs';
 import { getAuthState } from '../auth/authStore';
 import { PERIODIC_ELEMENTS } from '../data/periodicTable';
-import type { DataInputApplication } from '../types/contracts';
 
 const VALID_ELEMENT_SYMBOLS = new Set(PERIODIC_ELEMENTS.map((element) => element.symbol));
 
 type TerminalState = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
 type SearchKind = 'elements' | 'materials';
-type VizTab = 'elements' | 'detail' | 'terminal' | 'input';
+type VizTab = 'elements' | 'detail' | 'terminal';
 type SourceFilter = 'all' | 'local' | 'mp';
 
 interface SearchCardItem {
   id: string;
   kind: SearchKind;
+  sourceType: 'local' | 'mp';
   title: string;
   subtitle?: string;
   tag: string;
   fields: Array<{ key: string; value: string }>;
-}
-
-interface InputKvRow {
-  id: string;
-  key: string;
-  value: string;
 }
 
 interface MaterialOption {
@@ -530,17 +524,36 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+const terminalScrollState = {
+  stickBottom: true,
+};
+
 function isTerminalAtBottom(terminal: Terminal): boolean {
   const buf = terminal.buffer.active;
-  return buf.baseY + terminal.rows >= buf.length;
+  return buf.viewportY >= buf.baseY;
+}
+
+let terminalScrollRaf = 0;
+
+function scheduleTerminalScrollToBottom(terminal: Terminal) {
+  if (!terminalScrollState.stickBottom) return;
+  terminal.scrollToBottom();
+  if (terminalScrollRaf) {
+    cancelAnimationFrame(terminalScrollRaf);
+  }
+  terminalScrollRaf = requestAnimationFrame(() => {
+    terminalScrollRaf = 0;
+    if (terminalScrollState.stickBottom) {
+      terminal.scrollToBottom();
+    }
+  });
 }
 
 function writeTerminalChunk(terminal: Terminal, chunk: string, onDone?: () => void) {
   if (!chunk) return;
-  const stickToBottom = isTerminalAtBottom(terminal);
   terminal.write(chunk, () => {
-    if (stickToBottom) {
-      terminal.scrollToBottom();
+    if (terminalScrollState.stickBottom) {
+      scheduleTerminalScrollToBottom(terminal);
     }
     onDone?.();
   });
@@ -606,10 +619,6 @@ export function VisualizationPage() {
   const [terminalOutput, setTerminalOutput] = useState('');
   const [searchCards, setSearchCards] = useState<SearchCardItem[]>([]);
   const [searchEmptyText, setSearchEmptyText] = useState('');
-  const [inputRows, setInputRows] = useState<InputKvRow[]>([{ id: crypto.randomUUID(), key: '', value: '' }]);
-  const [submitStatus, setSubmitStatus] = useState('');
-  const [myApplications, setMyApplications] = useState<DataInputApplication[]>([]);
-  const [loadingApplications, setLoadingApplications] = useState(false);
   const [status, setStatus] = useState('');
   const [sidebarLattice, setSidebarLattice] = useState<LatticeRenderData | null>(null);
   const [sidebarLatticeStatus, setSidebarLatticeStatus] = useState('');
@@ -733,13 +742,17 @@ export function VisualizationPage() {
   }, [filteredMaterials, materialPickerQuery, selectedMaterialId]);
 
   const visibleSearchCards = useMemo(() => {
+    let list = searchCards;
+    if (sourceFilter !== 'all') {
+      list = list.filter((card) => card.sourceType === sourceFilter);
+    }
     const q = materialPickerQuery.trim().toLowerCase();
-    if (!q) return searchCards;
-    return searchCards.filter((card) => {
+    if (!q) return list;
+    return list.filter((card) => {
       const hay = `${card.title} ${card.subtitle ?? ''} ${card.tag} ${card.id}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [searchCards, materialPickerQuery]);
+  }, [searchCards, sourceFilter, materialPickerQuery]);
 
   const selectedMaterial = useMemo(
     () => filteredMaterials.find((item) => item.id === selectedMaterialId),
@@ -1050,6 +1063,10 @@ export function VisualizationPage() {
     terminal.attachCustomKeyEventHandler(preventBrowserStealingTerminalKeys);
     terminal.open(terminalMountRef.current);
     fitAddon.fit();
+    terminalScrollState.stickBottom = true;
+    terminal.onScroll(() => {
+      terminalScrollState.stickBottom = isTerminalAtBottom(terminal);
+    });
     terminal.scrollToBottom();
     terminal.writeln('终端已就绪。请先在左侧「添加服务器」填写远程 IP、SSH 用户名与密码，再连接。');
     terminal.onData((data) => {
@@ -1063,17 +1080,18 @@ export function VisualizationPage() {
     const refitTerminal = () => {
       if (!terminalMountRef.current || !fitAddonRef.current || !xtermRef.current) return;
       fitAddonRef.current.fit();
-      if (isTerminalAtBottom(xtermRef.current)) {
-        xtermRef.current.scrollToBottom();
+      if (terminalScrollState.stickBottom) {
+        scheduleTerminalScrollToBottom(xtermRef.current);
       }
     };
     const onResize = () => refitTerminal();
     window.addEventListener('resize', onResize);
+    const resizeTarget = terminalMountRef.current.parentElement ?? terminalMountRef.current;
     const resizeObserver =
-      typeof ResizeObserver !== 'undefined' && terminalMountRef.current
+      typeof ResizeObserver !== 'undefined' && resizeTarget
         ? new ResizeObserver(() => refitTerminal())
         : null;
-    resizeObserver?.observe(terminalMountRef.current);
+    resizeObserver?.observe(resizeTarget);
     return () => {
       window.removeEventListener('resize', onResize);
       resizeObserver?.disconnect();
@@ -1088,8 +1106,8 @@ export function VisualizationPage() {
     const timer = window.setTimeout(() => {
       fitAddonRef.current?.fit();
       const terminal = xtermRef.current;
-      if (terminal && isTerminalAtBottom(terminal)) {
-        terminal.scrollToBottom();
+      if (terminal && terminalScrollState.stickBottom) {
+        scheduleTerminalScrollToBottom(terminal);
       }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -1197,14 +1215,6 @@ export function VisualizationPage() {
       window.removeEventListener('resize', onResize);
     };
   }, [ws]);
-
-  useEffect(() => {
-    if (!auth.username) {
-      setMyApplications([]);
-      return;
-    }
-    void loadMyApplications();
-  }, [auth.username]);
 
   useEffect(() => {
     if (!elementFormula) {
@@ -1404,9 +1414,10 @@ export function VisualizationPage() {
               terminalAuthOkRef.current = true;
               setTerminalState('connected');
               setStatus('终端已连接');
+              terminalScrollState.stickBottom = true;
               fitAddonRef.current?.fit();
               sendTerminalResize(socket);
-              xtermRef.current?.scrollToBottom();
+              scheduleTerminalScrollToBottom(xtermRef.current!);
               window.setTimeout(() => requestRemoteList('.'), 240);
             }
           } catch {
@@ -1520,6 +1531,7 @@ export function VisualizationPage() {
     setSelectedRemoteName(next.selectedName || '');
     setTerminalState(nextState || 'idle');
     xtermRef.current?.clear();
+    terminalScrollState.stickBottom = true;
     if (next.output) {
       const terminal = xtermRef.current;
       if (terminal) writeTerminalChunk(terminal, next.output);
@@ -2221,6 +2233,7 @@ export function VisualizationPage() {
         matched.map((opt) => ({
           id: opt.id,
           kind: opt.kind,
+          sourceType: opt.sourceType,
           title: getMaterialFormulaPretty(opt) || opt.title,
           subtitle: buildSearchCardSubtitle(opt),
           tag: opt.tag,
@@ -2241,69 +2254,11 @@ export function VisualizationPage() {
     }
   }
 
-  function addInputRow() {
-    setInputRows((prev) => [...prev, { id: crypto.randomUUID(), key: '', value: '' }]);
-  }
-
-  function removeInputRow(id: string) {
-    setInputRows((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
-  }
-
-  function updateInputRow(id: string, field: 'key' | 'value', value: string) {
-    setInputRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
-  }
-
-  async function submitDataInputApplication() {
-    if (!auth.username) {
-      setSubmitStatus('请先登录');
-      return;
-    }
-    const payload: Record<string, unknown> = {};
-    inputRows.forEach((row) => {
-      const key = row.key.trim();
-      const value = row.value.trim();
-      if (key) {
-        payload[key] = value;
-      }
-    });
-    if (Object.keys(payload).length === 0) {
-      setSubmitStatus('请至少填写一行属性（需有字段名）');
-      return;
-    }
-    try {
-      const response = await pythonApi.submitDataInput({ username: auth.username, data: payload });
-      setSubmitStatus(response.success ? '提交成功，请等待管理员审核。' : response.message);
-      if (response.success) {
-        setInputRows([{ id: crypto.randomUUID(), key: '', value: '' }]);
-        await loadMyApplications();
-      }
-    } catch (error) {
-      setSubmitStatus(`提交失败: ${(error as Error).message}`);
-    }
-  }
-
-  async function loadMyApplications() {
-    if (!auth.username) {
-      setMyApplications([]);
-      return;
-    }
-    try {
-      setLoadingApplications(true);
-      const response = await pythonApi.myDataInputs(auth.username);
-      setMyApplications(response.data ?? []);
-    } catch {
-      // Keep existing list when refresh fails to avoid clearing useful context.
-    } finally {
-      setLoadingApplications(false);
-    }
-  }
-
   return (
     <>
       <section className="viz-legacy-page">
         <div className="viz-legacy-main-box">
-          <nav className="viz-legacy-platform-nav" id="platformNav">
-            <span className="viz-legacy-platform-title">基本物性计算平台</span>
+          <nav className="viz-legacy-platform-nav" id="platformNav" aria-label="可视化页次级导航">
             <div className="viz-legacy-platform-buttons">
               <button
                 type="button"
@@ -2326,16 +2281,10 @@ export function VisualizationPage() {
               >
                 终端
               </button>
-              <button
-                type="button"
-                className={`viz-legacy-platform-item ${activeTab === 'input' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('input')}
-              >
-                数据输入
-              </button>
             </div>
           </nav>
 
+          <div className="viz-legacy-body">
           <div className="viz-legacy-sec-box">
             <div className="viz-main">
 
@@ -2399,22 +2348,76 @@ export function VisualizationPage() {
             ) : null}
 
             {activeTab === 'detail' ? (
-              <section className="panel" style={{ marginTop: 12 }}>
-                <h3>详细数据（由右侧元素栏驱动）</h3>
-                <p>当前组合：{elementFormula || '未选择元素'}</p>
-                <label className="field" style={{ maxWidth: 420 }}>
-                  筛选检索结果（与右侧固定栏同步）
-                  <input
-                    type="search"
-                    value={materialPickerQuery}
-                    onChange={(e) => setMaterialPickerQuery(e.target.value)}
-                    placeholder="按元素、化学式、材料 ID 过滤…"
-                    disabled={searchCards.length === 0}
-                  />
-                </label>
+              <section className="panel viz-detail-panel" style={{ marginTop: 12 }}>
+                <h3>详细数据</h3>
+                <p className="viz-detail-intro">
+                  请先在右侧固定栏拖入元素并点击「检索」；在此设置筛选条件并浏览结果。结构 / 计算方法 / 稳定性 / 杨氏模量范围变更后需重新检索。
+                </p>
+                <p className="status">当前组合：{elementFormula || '未选择元素'}</p>
+
+                <div className="viz-detail-filters">
+                  <label className="field">
+                    数据源
+                    <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}>
+                      <option value="all">全部</option>
+                      <option value="local">本地数据库</option>
+                      <option value="mp">MP-API</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    结构
+                    <select value={structureFilter} onChange={(e) => setStructureFilter(e.target.value as StructureFilter)}>
+                      <option value="all">全部</option>
+                      <option value="fcc">fcc</option>
+                      <option value="bcc">bcc</option>
+                      <option value="hcp">hcp</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    计算方法
+                    <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value as MethodFilter)}>
+                      <option value="all">全部</option>
+                      <option value="stress_strain">应力-应变</option>
+                      <option value="energy_strain">能量-应变</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    稳定性
+                    <select value={stabilityFilter} onChange={(e) => setStabilityFilter(e.target.value as StabilityFilter)}>
+                      <option value="all">全部</option>
+                      <option value="passed">通过</option>
+                      <option value="failed">未通过</option>
+                      <option value="review">需复核</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    E-H 最小 (GPa)
+                    <input value={youngMin} onChange={(e) => setYoungMin(e.target.value)} placeholder="可选" />
+                  </label>
+                  <label className="field">
+                    E-H 最大 (GPa)
+                    <input value={youngMax} onChange={(e) => setYoungMax(e.target.value)} placeholder="可选" />
+                  </label>
+                  <label className="field viz-detail-filter-search">
+                    筛选材料
+                    <input
+                      type="search"
+                      value={materialPickerQuery}
+                      onChange={(e) => setMaterialPickerQuery(e.target.value)}
+                      placeholder="元素、化学式、mp-id…"
+                      disabled={searchCards.length === 0}
+                    />
+                  </label>
+                  <div className="viz-detail-filter-actions">
+                    <button type="button" className="btn" onClick={() => void fetchBarMaterials()} disabled={!elementFormula}>
+                      应用筛选并检索
+                    </button>
+                  </div>
+                </div>
+
                 {searchEmptyText ? <p className="status">{searchEmptyText}</p> : null}
                 {visibleSearchCards.length === 0 && searchCards.length > 0 ? (
-                  <p className="status">没有符合筛选条件的结果，请调整关键字。</p>
+                  <p className="status">没有符合筛选条件的结果，请调整筛选或关键字。</p>
                 ) : null}
                 {visibleSearchCards.length > 0 ? (
                   <div className="search-card-list">
@@ -2439,7 +2442,7 @@ export function VisualizationPage() {
                     ))}
                   </div>
                 ) : searchCards.length === 0 ? (
-                  <p className="status">请先在右侧拖入元素并完成检索。</p>
+                  <p className="status">请先在右侧固定栏拖入元素并完成检索。</p>
                 ) : null}
               </section>
             ) : null}
@@ -2448,7 +2451,7 @@ export function VisualizationPage() {
               <>
                 <section className="viz-terminal-page panel">
                   <div className="viz-terminal-layout">
-                    <aside className="viz-terminal-col viz-terminal-servers">
+                    <aside className={`viz-terminal-col viz-terminal-servers${showServerConfig ? ' is-editing' : ''}`}>
                       <div className="viz-terminal-col-head">服务器</div>
                       <div className="viz-terminal-server-list">
                         {servers.map((server) => {
@@ -2663,7 +2666,7 @@ export function VisualizationPage() {
                       ) : null}
                     </div>
 
-                    <div className="viz-terminal-col viz-terminal-console">
+                    <div className={`viz-terminal-col viz-terminal-console${showVaspImportPanel ? ' is-import-open' : ''}`}>
                       <div className="viz-terminal-console-tabs">
                         <span className="viz-terminal-console-tabs-static">终端</span>
                         {terminalSessions.map((session) => (
@@ -2705,8 +2708,16 @@ export function VisualizationPage() {
                           关闭
                         </button>
                       </div>
+                      <div className="viz-terminal-console-stack">
                       {showVaspImportPanel ? (
                         <div className="viz-terminal-import-panel">
+                          <div className="viz-terminal-import-panel-head">
+                            <strong>VASP 入库与后处理</strong>
+                            <button type="button" className="viz-terminal-import-panel-close" onClick={() => setShowVaspImportPanel(false)}>
+                              收起
+                            </button>
+                          </div>
+                          <div className="viz-terminal-import-panel-scroll">
                           <p className="viz-terminal-import-hint">
                             命令在 <strong>SSH 远程机</strong>上执行。脚本路径请填远程绝对路径（默认
                             /opt/cal_web/Cal_web/scripts/vasp_import.py）；Python 须 ≥3.9（CentOS 默认 python3 常为
@@ -2827,6 +2838,7 @@ export function VisualizationPage() {
                               </details>
                             ) : null}
                           </div>
+                          </div>
                         </div>
                       ) : null}
                       <div className="viz-terminal-console-body">
@@ -2836,67 +2848,11 @@ export function VisualizationPage() {
                           onClick={() => xtermRef.current?.focus()}
                         />
                       </div>
+                      </div>
                     </div>
                   </div>
                 </section>
               </>
-            ) : null}
-
-            {activeTab === 'input' ? (
-              <section className="panel" style={{ marginTop: 12 }}>
-                <h3>数据输入申请（page4）</h3>
-                <p>按键值对填写数据后提交，管理员在审核页通过后写入数据库。当前登录用户：{auth.username || '未登录'}</p>
-                <div className="input-kv-list">
-                  {inputRows.map((row) => (
-                    <div className="input-kv-row" key={row.id}>
-                      <input
-                        placeholder="字段名（如 material_name）"
-                        value={row.key}
-                        onChange={(e) => updateInputRow(row.id, 'key', e.target.value)}
-                      />
-                      <input
-                        placeholder="字段值（如 NbU3）"
-                        value={row.value}
-                        onChange={(e) => updateInputRow(row.id, 'value', e.target.value)}
-                      />
-                      <button className="btn secondary" onClick={() => removeInputRow(row.id)} disabled={inputRows.length === 1}>
-                        删除
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="row" style={{ marginTop: 10 }}>
-                  <button className="btn secondary" onClick={addInputRow}>
-                    添加一行
-                  </button>
-                  <button className="btn" onClick={submitDataInputApplication}>
-                    提交申请
-                  </button>
-                  <button className="btn secondary" onClick={loadMyApplications}>
-                    刷新我的申请
-                  </button>
-                </div>
-                <p className="status">{submitStatus || (loadingApplications ? '正在加载申请列表...' : '')}</p>
-                <div className="app-list">
-                  {myApplications.length === 0 ? (
-                    <p className="status">暂无申请记录</p>
-                  ) : (
-                    myApplications.map((item) => {
-                      const statusMap: Record<string, string> = {
-                        pending: '待管理员审核',
-                        approved: '已通过',
-                        rejected: '已拒绝',
-                      };
-                      return (
-                        <div className="app-item" key={item.id}>
-                          <span>{item.created_at || item.id}</span>
-                          <span className={`app-status app-status-${item.status}`}>{statusMap[item.status] || item.status}</span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </section>
             ) : null}
 
           </div>
@@ -2905,7 +2861,7 @@ export function VisualizationPage() {
           <aside className="viz-legacy-sec-box2">
             <div className="viz-sidebar">
             <h3>固定数据栏</h3>
-            <p>此栏不随次级页签切换。拖入元素后检索并选择数据源。</p>
+            <p>拖入元素、检索材料，并查看可视化与属性摘要。</p>
             <div
               className={`sidebar-dropzone ${droppedSymbols.length > 0 ? 'sidebar-dropzone-filled' : ''}`}
               onDragOver={(e) => e.preventDefault()}
@@ -2957,62 +2913,6 @@ export function VisualizationPage() {
             </div>
             <p className="status">当前组合：{elementFormula || '无'}</p>
 
-            <label className="field">
-              数据源
-              <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}>
-                <option value="all">全部</option>
-                <option value="local">本地数据库</option>
-                <option value="mp">MP-API</option>
-              </select>
-            </label>
-            <div className="row">
-              <label className="field">
-                结构
-                <select value={structureFilter} onChange={(e) => setStructureFilter(e.target.value as StructureFilter)}>
-                  <option value="all">全部</option>
-                  <option value="fcc">fcc</option>
-                  <option value="bcc">bcc</option>
-                  <option value="hcp">hcp</option>
-                </select>
-              </label>
-              <label className="field">
-                计算方法
-                <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value as MethodFilter)}>
-                  <option value="all">全部</option>
-                  <option value="stress_strain">应力-应变</option>
-                  <option value="energy_strain">能量-应变</option>
-                </select>
-              </label>
-              <label className="field">
-                稳定性
-                <select value={stabilityFilter} onChange={(e) => setStabilityFilter(e.target.value as StabilityFilter)}>
-                  <option value="all">全部</option>
-                  <option value="passed">通过</option>
-                  <option value="failed">未通过</option>
-                  <option value="review">需复核</option>
-                </select>
-              </label>
-            </div>
-            <div className="row">
-              <label className="field">
-                E-H 最小 (GPa)
-                <input value={youngMin} onChange={(e) => setYoungMin(e.target.value)} placeholder="可选" />
-              </label>
-              <label className="field">
-                E-H 最大 (GPa)
-                <input value={youngMax} onChange={(e) => setYoungMax(e.target.value)} placeholder="可选" />
-              </label>
-            </div>
-            <label className="field">
-              筛选材料
-              <input
-                type="search"
-                value={materialPickerQuery}
-                onChange={(e) => setMaterialPickerQuery(e.target.value)}
-                placeholder="元素、化学式、mp-id…"
-                disabled={filteredMaterials.length === 0}
-              />
-            </label>
             <label className="field">
               选择数据
               <select
@@ -3098,6 +2998,7 @@ export function VisualizationPage() {
             </div>
             </div>
           </aside>
+          </div>
         </div>
         <p className="status">{status}</p>
       </section>

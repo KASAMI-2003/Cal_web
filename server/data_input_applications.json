@@ -42,5 +42,20 @@
     "status": "rejected",
     "created_at": "2026-05-18 17:12:48",
     "reviewed_at": "2026-05-21 12:48:56"
+  },
+  {
+    "id": "1780915899731",
+    "username": "admin",
+    "data": {
+      "元素": "U-Nb",
+      "备注": "示例"
+    },
+    "status": "rejected",
+    "created_at": "2026-06-08 18:51:39",
+    "qc_workflow": {
+      "steps": [],
+      "status": "rejected"
+    },
+    "reviewed_at": "2026-06-08 18:52:03"
   }
 ]
