@@ -28,7 +28,27 @@ export function DataInputPanel({ title = '数据录入', showIntro = true }: Dat
   const auth = getAuthState();
   const [mode, setMode] = useState<InputMode>('form');
   const [inputRows, setInputRows] = useState<InputKvRow[]>([{ id: crypto.randomUUID(), key: '', value: '' }]);
-  const [jsonPayload, setJsonPayload] = useState('{"元素":"U-Nb","备注":"示例"}');
+  const [jsonPayload, setJsonPayload] = useState(
+    JSON.stringify(
+      {
+        元素: 'Al',
+        备注: '平台录入功能测试-单元素',
+        晶体结构: 'fcc',
+        晶格常数: '4.05',
+        晶格常数数据来源: 'VASP 静态计算 / 测试用',
+        k取值: '0.15',
+        etmx: '0.03',
+        '杨氏模量E-H': '72.5',
+        体积模量B_H: '76.2',
+        泊松比nu_H: '0.35',
+        弹性刚度常数C11: '108.2',
+        C12: '60.1',
+        C44: '28.3',
+      },
+      null,
+      2,
+    ),
+  );
   const [submitStatus, setSubmitStatus] = useState('');
   const [myApplications, setMyApplications] = useState<DataInputApplication[]>([]);
   const [loadingApplications, setLoadingApplications] = useState(false);

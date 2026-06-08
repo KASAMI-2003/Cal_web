@@ -1,0 +1,15 @@
+{
+  "material_name": "NbU-test-entry",
+  "u_at_pct": "50.00",
+  "nb_at_pct": "50.00",
+  "space_group_no": "229",
+  "data_source": "平台录入功能测试",
+  "a": "3.398",
+  "b": "3.398",
+  "c": "3.398",
+  "alpha": "90",
+  "beta": "90",
+  "gamma": "90",
+  "data_type": "calculated",
+  "notes": "审核通过时请选择目标库 materials"
+}
