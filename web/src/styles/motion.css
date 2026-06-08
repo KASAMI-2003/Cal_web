@@ -1,0 +1,251 @@
+/* 全站动效：路由切换、滚动显现、按钮与卡片交互 */
+
+@keyframes route-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+@keyframes motion-flow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.25);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(6, 182, 212, 0);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes motion-arrow-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(4px);
+  }
+}
+
+@keyframes motion-gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.route-fade-in {
+  animation: route-fade-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.motion-hero-bg {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e0f2fe 35%, #f8fafc 70%, #ecfeff 100%);
+  background-size: 200% 200%;
+  animation: motion-gradient-shift 14s ease infinite;
+}
+
+.motion-fade-up {
+  animation: motion-fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.motion-delay-1 {
+  animation-delay: 0.1s;
+}
+
+.motion-delay-2 {
+  animation-delay: 0.2s;
+}
+
+.motion-delay-3 {
+  animation-delay: 0.32s;
+}
+
+.motion-delay-4 {
+  animation-delay: 0.44s;
+}
+
+.motion-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.motion-reveal.motion-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.motion-title-shimmer {
+  background: linear-gradient(90deg, #06b6d4 0%, #0891b2 35%, #22d3ee 50%, #0891b2 65%, #06b6d4 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: motion-shimmer 6s linear infinite;
+}
+
+.motion-card-lift {
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.motion-card-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.home-flow-step {
+  animation: motion-flow-pulse 2.8s ease-in-out infinite;
+}
+
+.home-flow-step:nth-child(odd) {
+  animation-delay: 0.4s;
+}
+
+.home-flow-arrow {
+  animation: motion-arrow-bounce 1.6s ease-in-out infinite;
+}
+
+.home-focus-item,
+.home-step {
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.home-focus-item:hover,
+.home-step:hover {
+  transform: translateX(4px);
+  box-shadow: 0 6px 16px rgba(63, 81, 181, 0.12);
+}
+
+.home-focus-cta {
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    background-color 0.22s ease;
+}
+
+.home-focus-cta:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.35);
+}
+
+.home-doc-image {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease;
+}
+
+.home-image-placeholder:hover .home-doc-image {
+  transform: scale(1.02);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.15);
+}
+
+.dropdown-content {
+  transform: translateY(-12px) scale(0.96);
+}
+
+.dropdown:hover .dropdown-content {
+  transform: translateY(0) scale(1);
+}
+
+.btn {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.app-main .panel {
+  animation: motion-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.site-header-nav {
+  transition:
+    box-shadow 0.3s ease,
+    background-color 0.3s ease;
+}
+
+.site-header-nav.site-header-nav--scrolled {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  background-color: rgba(15, 23, 42, 0.96) !important;
+  backdrop-filter: blur(10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-fade-in,
+  .motion-fade-up,
+  .motion-title-shimmer,
+  .home-flow-step,
+  .home-flow-arrow,
+  .motion-hero-bg {
+    animation: none !important;
+  }
+
+  .motion-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .motion-card-lift:hover,
+  .btn:hover:not(:disabled),
+  .home-focus-item:hover,
+  .home-step:hover {
+    transform: none;
+  }
+}

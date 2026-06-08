@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { pythonApi } from '../api/pythonApi';
+import { RevealOnScroll } from '../components/RevealOnScroll';
 
 function parseElementInput(raw: string): { element: string; num_element: number } | null {
   const match = raw.trim().match(/^(\d*)([A-Za-z-]+)$/);
@@ -16,8 +17,9 @@ function attachHomeStarfield(canvas: HTMLCanvasElement): () => void {
   if (!gctx) return () => {};
   const renderCtx = gctx;
 
-  const numPoints = 100;
-  type Pt = { x: number; y: number; vx: number; vy: number; color: string };
+  const numPoints = 80;
+  const linkDistance = 130;
+  type Pt = { x: number; y: number; vx: number; vy: number; radius: number; alpha: number };
   const points: Pt[] = [];
 
   function sizeCanvas() {
@@ -36,9 +38,10 @@ function attachHomeStarfield(canvas: HTMLCanvasElement): () => void {
       points.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 2,
-        vy: (Math.random() - 0.5) * 2,
-        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: (Math.random() - 0.5) * 1.2,
+        radius: 1.2 + Math.random() * 1.6,
+        alpha: 0.35 + Math.random() * 0.45,
       });
     }
   }
@@ -49,14 +52,32 @@ function attachHomeStarfield(canvas: HTMLCanvasElement): () => void {
   let raf = 0;
   function update() {
     renderCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const dx = points[i].x - points[j].x;
+        const dy = points[i].y - points[j].y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < linkDistance) {
+          const opacity = (1 - dist / linkDistance) * 0.22;
+          renderCtx.strokeStyle = `rgba(6, 182, 212, ${opacity})`;
+          renderCtx.lineWidth = 0.6;
+          renderCtx.beginPath();
+          renderCtx.moveTo(points[i].x, points[i].y);
+          renderCtx.lineTo(points[j].x, points[j].y);
+          renderCtx.stroke();
+        }
+      }
+    }
+
     for (const point of points) {
       point.x += point.vx;
       point.y += point.vy;
       if (point.x <= 0 || point.x >= canvas.width) point.vx = -point.vx;
       if (point.y <= 0 || point.y >= canvas.height) point.vy = -point.vy;
-      renderCtx.fillStyle = point.color;
+      renderCtx.fillStyle = `rgba(6, 182, 212, ${point.alpha})`;
       renderCtx.beginPath();
-      renderCtx.arc(point.x, point.y, 2, 0, Math.PI * 2);
+      renderCtx.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
       renderCtx.fill();
     }
     raf = requestAnimationFrame(update);
@@ -179,13 +200,13 @@ export function HomePage() {
 
   return (
     <div className="home-mainpage">
-      <div className="home-hero-wrap">
+      <div className="home-hero-wrap motion-hero-bg">
         <canvas ref={canvasRef} className="home-background-canvas" aria-hidden />
         <div className="home-hero-inner">
           <div className="home-main-box">
-            <div className="home-essential-box">
+            <div className="home-essential-box motion-fade-up motion-card-lift">
               <div className="home-project-content">
-                <h1 className="home-project-title">基于AI的基本物性集成计算平台</h1>
+                <h1 className="home-project-title motion-title-shimmer">基于AI的基本物性集成计算平台</h1>
                 <h2>项目简介</h2>
                 <p>
                   作为强有力的工具，机器学习已经广泛应用于工业设计和科学研究领域当中。机器学习作为人工智能领域的重要分支之一，其特点是以数据为基础，能够对收集到的数据进行分析，实现对目标的高精度预测。就科学研究而言，早在20年前，机器学习与统计物理已有诸多的交集，典型的如团簇扩展方法，广泛应用于合金的性能预测。
@@ -202,7 +223,7 @@ export function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="home-sec-box">
+            <div className="home-sec-box motion-fade-up motion-delay-2 motion-card-lift">
               <div
                 className="home-sec-box-header"
                 onClick={() => setDemoOpen((o) => !o)}
@@ -249,9 +270,10 @@ export function HomePage() {
         </div>
       </div>
 
-      <section className="home-site-section">
-        <div className="home-container">
-          <h2 className="home-section-title">多源弹性数据检索</h2>
+      <RevealOnScroll>
+        <section className="home-site-section">
+          <div className="home-container">
+            <h2 className="home-section-title">多源弹性数据检索</h2>
           <p>并联查询本地 MySQL 物性库与 Materials Project；可按晶系筛选（fcc/bcc/hcp）。</p>
           <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
             <label className="field">
@@ -274,10 +296,12 @@ export function HomePage() {
           <textarea className="home-result-textarea" readOnly rows={8} value={homeSearchResult} />
         </div>
       </section>
+      </RevealOnScroll>
 
-      <section id="vasp-documentation" className="home-site-section home-vasp-documentation">
-        <div className="home-container">
-          <h2 className="home-section-title">VASP计算元素力学性质辅助文档</h2>
+      <RevealOnScroll delayMs={80}>
+        <section id="vasp-documentation" className="home-site-section home-vasp-documentation">
+          <div className="home-container">
+            <h2 className="home-section-title">VASP计算元素力学性质辅助文档</h2>
           <div className="home-doc-content">
             <h3>计算流程概述</h3>
             <div className="home-flow-chart">
@@ -446,7 +470,9 @@ export function HomePage() {
           </div>
         </div>
       </section>
+      </RevealOnScroll>
 
+      <RevealOnScroll delayMs={120}>
       <section id="documentation" className="home-site-section home-documentation">
         <div className="home-container">
           <h2 className="home-section-title">辅助文档</h2>
@@ -477,6 +503,7 @@ export function HomePage() {
           </div>
         </div>
       </section>
+      </RevealOnScroll>
     </div>
   );
 }

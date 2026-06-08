@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import ustbEmblem from './assets/ustb-emblem.png';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
@@ -11,6 +12,7 @@ import { VisualizationPage } from './pages/VisualizationPage';
 import { DigitalTwinPage } from './pages/DigitalTwinPage';
 import { getAuthState } from './auth/authStore';
 import { MP_API_BLOCKED_NOTICE_TEXT, SHOW_MP_API_BLOCKED_NOTICE } from './config/opsNotice';
+import { useNavScrollEffect } from './hooks/useNavScrollEffect';
 
 const publicRoutes = new Set(['/login', '/register', '/']);
 
@@ -40,7 +42,7 @@ function TopNav() {
       <ul className="site-header-nav__list">
         <li className="site-header-nav__item site-header-nav__logo">
           <NavLink to="/" className="site-header-nav__link">
-            <img src="/img/ustb-emblem.png" alt="北京科技大学" className="site-header-nav__logo-img" height="40" />
+            <img src={ustbEmblem} alt="北京科技大学" className="site-header-nav__logo-img" height="40" />
           </NavLink>
         </li>
         <li className="site-header-nav__item">
@@ -118,12 +120,17 @@ function SiteOpsNotice() {
 }
 
 export function App() {
+  const location = useLocation();
+  useNavScrollEffect();
+  const isHome = location.pathname === '/';
+
   return (
     <div className={`app-shell${SHOW_MP_API_BLOCKED_NOTICE ? ' app-shell--ops-notice' : ''}`}>
       <TopNav />
       <SiteOpsNotice />
-      <main className="app-main">
-        <Routes>
+      <main className={`app-main${isHome ? ' app-main--home' : ''}`}>
+        <div key={location.pathname} className="route-fade-in">
+          <Routes location={location}>
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
@@ -169,7 +176,8 @@ export function App() {
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </div>
       </main>
     </div>
   );
