@@ -2568,32 +2568,12 @@ body {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
-.home-team-image {
-  width: 300px;
-  height: auto;
-  float: right;
-  margin: 0 0 20px 20px;
-  border-radius: 10px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  transition: transform 0.3s ease;
-}
-
-.home-team-image:hover {
-  transform: scale(1.05);
-}
-
 .home-project-content {
   flex: 1;
   min-width: 300px;
   text-align: justify;
   line-height: 1.8;
   color: #0f172a;
-}
-
-.home-project-content::after {
-  content: '';
-  display: table;
-  clear: both;
 }
 
 .home-project-content h2 {
@@ -2612,12 +2592,6 @@ body {
   font-weight: bold;
   margin-bottom: 15px;
   color: #06b6d4;
-}
-
-.home-team-members {
-  font-size: 18px;
-  margin-bottom: 15px;
-  color: #666;
 }
 
 .home-sec-box {
@@ -2937,12 +2911,6 @@ body {
 
   .home-sec-box {
     width: 92%;
-  }
-
-  .home-team-image {
-    float: none;
-    display: block;
-    margin: 16px auto;
   }
 
   .home-research-focus {

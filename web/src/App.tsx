@@ -40,7 +40,7 @@ function TopNav() {
       <ul className="site-header-nav__list">
         <li className="site-header-nav__item site-header-nav__logo">
           <NavLink to="/" className="site-header-nav__link">
-            <img src="/img/logol.png" alt="首页" className="site-header-nav__logo-img" height="40" />
+            <img src="/img/ustb-emblem.png" alt="北京科技大学" className="site-header-nav__logo-img" height="40" />
           </NavLink>
         </li>
         <li className="site-header-nav__item">

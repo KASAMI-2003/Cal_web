@@ -186,8 +186,6 @@ export function HomePage() {
             <div className="home-essential-box">
               <div className="home-project-content">
                 <h1 className="home-project-title">基于AI的基本物性集成计算平台</h1>
-                <div className="home-team-members">团队成员：</div>
-                <img src="/img/team-photo.jpg" alt="团队照片" className="home-team-image" />
                 <h2>项目简介</h2>
                 <p>
                   作为强有力的工具，机器学习已经广泛应用于工业设计和科学研究领域当中。机器学习作为人工智能领域的重要分支之一，其特点是以数据为基础，能够对收集到的数据进行分析，实现对目标的高精度预测。就科学研究而言，早在20年前，机器学习与统计物理已有诸多的交集，典型的如团簇扩展方法，广泛应用于合金的性能预测。
