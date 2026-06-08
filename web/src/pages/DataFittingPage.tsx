@@ -24,6 +24,35 @@ interface ChartBounds {
   maxY: number;
 }
 
+function buildFitCoeffsCsv(result: DataFitResponse, fitType: string, degree: number): string {
+  const lines: string[] = [
+    'section,key,value',
+    'meta,fit_type,' + fitType,
+    'meta,degree,' + (fitType === 'Polynomial' ? String(degree) : 'n/a'),
+    'meta,r_squared,' + (result.r_squared ?? ''),
+    'meta,rmse,' + (result.rmse ?? result.strain_fit_residual ?? ''),
+    'meta,strain_fit_residual,' + (result.strain_fit_residual ?? result.rmse ?? ''),
+    'meta,fit_function,' + JSON.stringify(result.fit_func ?? ''),
+  ];
+  const coeffs = result.coeffs ?? [];
+  const stderr = result.coeff_stderr ?? [];
+  lines.push('coeff,index,value,std_error');
+  coeffs.forEach((value, index) => {
+    const err = stderr[index];
+    lines.push(`coeff,${index},${value},${err ?? ''}`);
+  });
+  if (result.covariance_matrix && result.covariance_matrix.length > 0) {
+    lines.push('covariance_matrix,,');
+    for (const row of result.covariance_matrix) {
+      lines.push('cov_row,,' + row.map((v) => String(v)).join(','));
+    }
+  }
+  if (result.uncertainty_note) {
+    lines.push('meta,uncertainty_note,' + JSON.stringify(result.uncertainty_note));
+  }
+  return lines.join('\n');
+}
+
 export function DataFittingPage() {
   const chartSvgRef = useRef<SVGSVGElement | null>(null);
   const [points, setPoints] = useState<PointRow[]>([
@@ -323,7 +352,22 @@ export function DataFittingPage() {
     URL.revokeObjectURL(a.href);
   }
 
-  function applySampleData(kind: 'exp' | 'poly' | 'sin') {
+  function exportFitCoeffsCsv() {
+    if (!result || result.status !== 'success') {
+      setStatus('请先完成一次成功拟合');
+      return;
+    }
+    const csv = buildFitCoeffsCsv(result, fitType, degree);
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fit-coefficients-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus('已导出拟合系数 CSV（含标准误差与协方差矩阵）');
+  }
+
+  function applySampleData(kind: 'exp' | 'poly' | 'sin' | 'strain') {
     const next: PointRow[] = [];
     if (kind === 'exp') {
       for (let i = 1; i <= 8; i += 1) {
@@ -331,12 +375,29 @@ export function DataFittingPage() {
       }
       setFitType('Exponential');
       setDegree(2);
+      setXLabel('X');
+      setYLabel('Y');
     } else if (kind === 'poly') {
       for (let i = -4; i <= 4; i += 1) {
         next.push({ id: crypto.randomUUID(), x: String(i), y: String(i * i - 2 * i + 1) });
       }
       setFitType('Polynomial');
       setDegree(2);
+      setXLabel('X');
+      setYLabel('Y');
+    } else if (kind === 'strain') {
+      const strains = [-0.02, -0.01, 0, 0.01, 0.02];
+      const e0 = 100.0;
+      const c2 = 8000.0;
+      for (const eps of strains) {
+        const energy = e0 + c2 * eps * eps;
+        next.push({ id: crypto.randomUUID(), x: String(eps), y: String(Number(energy.toFixed(4))) });
+      }
+      setFitType('Polynomial');
+      setDegree(2);
+      setXLabel('应变 ε');
+      setYLabel('能量 E (eV)');
+      setChartTitle('应变—能量二次拟合（能量-应变法示意）');
     } else {
       for (let i = 0; i <= 12; i += 1) {
         const x = (i * Math.PI) / 6;
@@ -344,6 +405,8 @@ export function DataFittingPage() {
       }
       setFitType('Sine');
       setDegree(2);
+      setXLabel('X');
+      setYLabel('Y');
     }
     setPoints(next);
     setResult(null);
@@ -376,6 +439,9 @@ export function DataFittingPage() {
           </button>
           <button className="btn secondary" onClick={() => applySampleData('sin')}>
             示例数据-正弦
+          </button>
+          <button className="btn secondary" onClick={() => applySampleData('strain')}>
+            示例数据-应变能量
           </button>
         </div>
             <div className="fit-table-wrap">
@@ -442,11 +508,11 @@ export function DataFittingPage() {
                 <button className="btn secondary" onClick={exportResultJson}>
                   导出结果 JSON
                 </button>
-              </div>
-              <div className="field">
-                <span>导出</span>
                 <button className="btn secondary" onClick={exportPointsCsv}>
-                  导出数据 CSV
+                  导出数据点 CSV
+                </button>
+                <button className="btn secondary" onClick={exportFitCoeffsCsv}>
+                  导出系数 CSV
                 </button>
               </div>
             </div>
@@ -555,9 +621,34 @@ export function DataFittingPage() {
                   <strong>{result.r_squared ?? '-'}</strong>
                 </div>
                 <div className="app-item">
-                  <span>系数参数</span>
-                  <strong>{(result.coeffs ?? []).join(', ') || '-'}</strong>
+                  <span>RMSE / 应变拟合残差</span>
+                  <strong>{result.rmse ?? result.strain_fit_residual ?? '-'}</strong>
                 </div>
+                <div className="app-item">
+                  <span>系数参数 (±标准误差)</span>
+                  <strong>
+                    {(result.coeffs ?? [])
+                      .map((c, i) => {
+                        const err = result.coeff_stderr?.[i];
+                        return err != null ? `${c} ± ${err}` : String(c);
+                      })
+                      .join(', ') || '-'}
+                  </strong>
+                </div>
+                {result.covariance_matrix && result.covariance_matrix.length > 0 ? (
+                  <div className="app-item fit-cov-block">
+                    <span>系数协方差矩阵</span>
+                    <pre className="mono fit-cov-matrix">
+                      {result.covariance_matrix.map((row) => row.map((v) => v.toExponential(3)).join('\t')).join('\n')}
+                    </pre>
+                  </div>
+                ) : null}
+                {result.uncertainty_note ? (
+                  <div className="app-item">
+                    <span>不确定度说明</span>
+                    <strong>{result.uncertainty_note}</strong>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="status">暂无成功拟合参数</p>

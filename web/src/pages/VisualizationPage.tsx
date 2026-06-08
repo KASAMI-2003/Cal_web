@@ -297,6 +297,37 @@ function inferLatticeType(structure: string): 'fcc' | 'bcc' | 'hcp' {
   return 'fcc';
 }
 
+function pickPrimaryElement(data: Record<string, unknown>, formulaSymbols: string[]): string {
+  const raw = String(data.元素 ?? data.element ?? '').trim();
+  if (raw && VALID_ELEMENT_SYMBOLS.has(raw)) {
+    return raw;
+  }
+  const fromFormula = formulaSymbols.find((sym) => VALID_ELEMENT_SYMBOLS.has(sym));
+  return fromFormula ?? 'Cu';
+}
+
+function parseLatticeMeshResponse(generated: {
+  points?: unknown[];
+  connections?: unknown[];
+  elements?: string[];
+  lattice_a?: number;
+  source?: string;
+  structure?: string;
+  n_atoms?: number;
+}) {
+  const points = (generated.points ?? [])
+    .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
+    .filter((row) => row.length === 3 && row.every((v) => Number.isFinite(v))) as number[][];
+  const bonds = (generated.connections ?? [])
+    .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
+    .filter((row) => row.length === 2 && row.every((v) => Number.isFinite(v))) as number[][];
+  const elements =
+    Array.isArray(generated.elements) && generated.elements.length === points.length
+      ? generated.elements.map((sym) => String(sym))
+      : points.map(() => 'default');
+  return { points, bonds, elements, latticeScale: generated.lattice_a ?? 3.5, meta: generated };
+}
+
 function parseMpApiMaterials(lines: string[] | undefined): MaterialOption[] {
   if (!lines || lines.length === 0) return [];
   const parsed: Array<Record<string, unknown>> = [];
@@ -499,6 +530,22 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function isTerminalAtBottom(terminal: Terminal): boolean {
+  const buf = terminal.buffer.active;
+  return buf.baseY + terminal.rows >= buf.length;
+}
+
+function writeTerminalChunk(terminal: Terminal, chunk: string, onDone?: () => void) {
+  if (!chunk) return;
+  const stickToBottom = isTerminalAtBottom(terminal);
+  terminal.write(chunk, () => {
+    if (stickToBottom) {
+      terminal.scrollToBottom();
+    }
+    onDone?.();
+  });
+}
+
 function preventBrowserStealingTerminalKeys(ev: KeyboardEvent): boolean {
   if (ev.type !== 'keydown') return true;
   const k = ev.key;
@@ -508,7 +555,6 @@ function preventBrowserStealingTerminalKeys(ev: KeyboardEvent): boolean {
   }
   if (k === 'Unidentified') return true;
   if (k.startsWith('Arrow') || k === 'PageUp' || k === 'PageDown' || k === 'Home' || k === 'End') {
-    ev.preventDefault();
     return true;
   }
   if (ev.ctrlKey && !ev.altKey && !ev.metaKey && k.length === 1) {
@@ -545,6 +591,9 @@ export function VisualizationPage() {
   const [youngMin, setYoungMin] = useState('');
   const [youngMax, setYoungMax] = useState('');
   const [outcarPreview, setOutcarPreview] = useState('');
+  const [analysisScanDir, setAnalysisScanDir] = useState('.');
+  const [extPropsResult, setExtPropsResult] = useState('');
+  const [convergenceResult, setConvergenceResult] = useState('');
   const [materialPickerQuery, setMaterialPickerQuery] = useState('');
   const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
@@ -564,6 +613,8 @@ export function VisualizationPage() {
   const [status, setStatus] = useState('');
   const [sidebarLattice, setSidebarLattice] = useState<LatticeRenderData | null>(null);
   const [sidebarLatticeStatus, setSidebarLatticeStatus] = useState('');
+  const [poscarDraft, setPoscarDraft] = useState('');
+  const [poscarPanelOpen, setPoscarPanelOpen] = useState(false);
   const sidebarLatticeRef = useRef<HTMLDivElement | null>(null);
   const [servers, setServers] = useState<TerminalServerProfile[]>(() => readSavedTerminalServers());
   const [selectedServerId, setSelectedServerId] = useState<string>(() => readSavedTerminalServers()[0]?.id ?? DEFAULT_TERMINAL_SERVER.id);
@@ -999,6 +1050,7 @@ export function VisualizationPage() {
     terminal.attachCustomKeyEventHandler(preventBrowserStealingTerminalKeys);
     terminal.open(terminalMountRef.current);
     fitAddon.fit();
+    terminal.scrollToBottom();
     terminal.writeln('终端已就绪。请先在左侧「添加服务器」填写远程 IP、SSH 用户名与密码，再连接。');
     terminal.onData((data) => {
       const currentWs = wsRef.current;
@@ -1008,15 +1060,40 @@ export function VisualizationPage() {
     });
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    const onResize = () => fitAddon.fit();
+    const refitTerminal = () => {
+      if (!terminalMountRef.current || !fitAddonRef.current || !xtermRef.current) return;
+      fitAddonRef.current.fit();
+      if (isTerminalAtBottom(xtermRef.current)) {
+        xtermRef.current.scrollToBottom();
+      }
+    };
+    const onResize = () => refitTerminal();
     window.addEventListener('resize', onResize);
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' && terminalMountRef.current
+        ? new ResizeObserver(() => refitTerminal())
+        : null;
+    resizeObserver?.observe(terminalMountRef.current);
     return () => {
       window.removeEventListener('resize', onResize);
+      resizeObserver?.disconnect();
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'terminal') return;
+    const timer = window.setTimeout(() => {
+      fitAddonRef.current?.fit();
+      const terminal = xtermRef.current;
+      if (terminal && isTerminalAtBottom(terminal)) {
+        terminal.scrollToBottom();
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, showVaspImportPanel]);
 
   function focusTerminalSoon() {
     window.setTimeout(() => {
@@ -1031,6 +1108,38 @@ export function VisualizationPage() {
       return;
     }
     void connectTerminal();
+  }
+
+  useEffect(() => {
+    setAnalysisScanDir(remoteCwd === '~' ? '.' : remoteCwd);
+  }, [remoteCwd]);
+
+  function resolveAnalysisDir(): string {
+    const raw = analysisScanDir.trim();
+    if (raw) return raw;
+    return remoteCwd === '~' ? '.' : remoteCwd;
+  }
+
+  async function runExtendedPropsScan(module: 'all' | 'band_structure' | 'dos' | 'phonon' = 'all') {
+    const dir = resolveAnalysisDir();
+    setExtPropsResult(`正在扫描扩展物性（${dir}）…`);
+    try {
+      const res = await pythonApi.scanExtendedProperties({ work_dir: dir, module });
+      setExtPropsResult(JSON.stringify(res, null, 2));
+    } catch (error) {
+      setExtPropsResult(`扫描失败: ${(error as Error).message}`);
+    }
+  }
+
+  async function runConvergenceScan() {
+    const dir = resolveAnalysisDir();
+    setConvergenceResult(`正在扫描 ENCUT/k 收敛（${dir}）…`);
+    try {
+      const res = await pythonApi.scanConvergence({ root_dir: dir, threshold_gpa: 2.0 });
+      setConvergenceResult(JSON.stringify(res, null, 2));
+    } catch (error) {
+      setConvergenceResult(`扫描失败: ${(error as Error).message}`);
+    }
   }
 
   useEffect(() => {
@@ -1297,6 +1406,7 @@ export function VisualizationPage() {
               setStatus('终端已连接');
               fitAddonRef.current?.fit();
               sendTerminalResize(socket);
+              xtermRef.current?.scrollToBottom();
               window.setTimeout(() => requestRemoteList('.'), 240);
             }
           } catch {
@@ -1411,7 +1521,8 @@ export function VisualizationPage() {
     setTerminalState(nextState || 'idle');
     xtermRef.current?.clear();
     if (next.output) {
-      xtermRef.current?.write(next.output);
+      const terminal = xtermRef.current;
+      if (terminal) writeTerminalChunk(terminal, next.output);
     }
     setStatus(`已切换到 ${next.name}`);
   }
@@ -1525,7 +1636,10 @@ export function VisualizationPage() {
       setSelectedRemoteName(next.selectedName || '');
       setTerminalState(nextState || 'idle');
       xtermRef.current?.clear();
-      if (next.output) xtermRef.current?.write(next.output);
+      if (next.output) {
+        const terminal = xtermRef.current;
+        if (terminal) writeTerminalChunk(terminal, next.output);
+      }
     }
   }
 
@@ -1599,7 +1713,7 @@ export function VisualizationPage() {
     }
     const terminal = xtermRef.current;
     if (terminal && displayChunk) {
-      terminal.write(displayChunk);
+      writeTerminalChunk(terminal, displayChunk);
     }
     if (displayChunk) {
       setTerminalOutput((prev) => `${prev}${displayChunk}`);
@@ -1846,12 +1960,47 @@ export function VisualizationPage() {
     setTransferStatus(`下载请求已发送：${remotePath}`);
   }
 
-  async function generateSidebarLattice() {
-    if (!selectedMaterial) {
+  async function generateSidebarLattice(fromPoscar = false) {
+    if (!selectedMaterial && !fromPoscar) {
       setSidebarLatticeStatus('请先选择数据');
       return;
     }
-    const data = selectedMaterial.data;
+
+    const poscarText = poscarDraft.trim();
+    if (fromPoscar || poscarText) {
+      if (!poscarText) {
+        setSidebarLatticeStatus('请粘贴 POSCAR / CONTCAR 内容');
+        return;
+      }
+      try {
+        const generated = await pythonApi.createLatticePicture({ poscar: poscarText });
+        if (generated.success === false || generated.error) {
+          setSidebarLattice(null);
+          setSidebarLatticeStatus(`POSCAR 解析失败: ${generated.error ?? '未知错误'}`);
+          return;
+        }
+        const mesh = parseLatticeMeshResponse(generated);
+        if (mesh.points.length === 0) {
+          setSidebarLatticeStatus('POSCAR 解析成功但未得到有效坐标');
+          return;
+        }
+        setSidebarLattice({
+          positions: mesh.points,
+          connections: mesh.bonds,
+          latticeConst: mesh.latticeScale,
+          elements: mesh.elements,
+        });
+        setSidebarLatticeStatus(
+          `ASE 已解析 POSCAR（${generated.n_atoms ?? mesh.points.length} 原子，${mesh.bonds.length} 键）`,
+        );
+      } catch (error) {
+        setSidebarLattice(null);
+        setSidebarLatticeStatus(`POSCAR 解析失败: ${(error as Error).message}`);
+      }
+      return;
+    }
+
+    const data = selectedMaterial!.data;
     const positions = Array.isArray(data.positions) ? (data.positions as unknown[]) : [];
     const connections = Array.isArray(data.connections) ? (data.connections as unknown[]) : [];
     const parsedPositions = positions
@@ -1861,11 +2010,12 @@ export function VisualizationPage() {
       .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
       .filter((row) => row.length === 2 && row.every((v) => Number.isFinite(v))) as number[][];
     const formulaSymbols =
-      String(data.化学式 ?? data.formula_pretty ?? data.db_formula ?? selectedMaterial.title)
+      String(data.化学式 ?? data.formula_pretty ?? data.db_formula ?? selectedMaterial!.title)
         .match(/[A-Z][a-z]?/g)
         ?.filter(Boolean) ?? ['default'];
     const axes = parseLatticeAxes(data);
     const latticeConst = axes.a ?? axes.b ?? axes.c ?? 3.5;
+    const primaryElement = pickPrimaryElement(data, formulaSymbols);
 
     if (parsedPositions.length > 0) {
       setSidebarLattice({
@@ -1881,22 +2031,28 @@ export function VisualizationPage() {
     try {
       const structure = String(data.晶体结构 ?? '');
       const latticeType = inferLatticeType(structure);
-      const generated = await pythonApi.createLatticePicture({ lattice_const: latticeType });
-      const generatedPoints = (generated.points ?? []) as unknown[];
-      const generatedConnections = (generated.connections ?? []) as unknown[];
-      const points = generatedPoints
-        .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
-        .filter((row) => row.length === 3 && row.every((v) => Number.isFinite(v))) as number[][];
-      const bonds = generatedConnections
-        .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
-        .filter((row) => row.length === 2 && row.every((v) => Number.isFinite(v))) as number[][];
-      setSidebarLattice({
-        positions: points,
-        connections: bonds,
-        latticeConst,
-        elements: points.map((_, idx) => formulaSymbols[idx % formulaSymbols.length] ?? 'default'),
+      const generated = await pythonApi.createLatticePicture({
+        lattice_const: latticeType,
+        lattice_a: axes.a ?? undefined,
+        lattice_b: axes.b ?? undefined,
+        lattice_c: axes.c ?? undefined,
+        element: primaryElement,
       });
-      setSidebarLatticeStatus(`已按 ${latticeType} 生成原胞图`);
+      const mesh = parseLatticeMeshResponse(generated);
+      if (mesh.points.length === 0) {
+        setSidebarLatticeStatus('后端未返回有效晶格点');
+        return;
+      }
+      setSidebarLattice({
+        positions: mesh.points,
+        connections: mesh.bonds,
+        latticeConst: mesh.latticeScale || latticeConst,
+        elements: mesh.elements,
+      });
+      const src = generated.source === 'ase_bulk' ? 'ASE bulk' : generated.source ?? 'ASE';
+      setSidebarLatticeStatus(
+        `${src} 已生成 ${latticeType.toUpperCase()} 原胞（${primaryElement}，a≈${(generated.lattice_a ?? latticeConst).toFixed(3)} Å，${mesh.points.length} 原子）`,
+      );
     } catch (error) {
       setSidebarLattice(null);
       setSidebarLatticeStatus(`原胞图生成失败: ${(error as Error).message}`);
@@ -2628,6 +2784,49 @@ export function VisualizationPage() {
                           {outcarPreview ? (
                             <pre className="viz-outcar-preview">{outcarPreview.slice(-4000)}</pre>
                           ) : null}
+                          <div className="viz-analysis-panel">
+                            <h4>扩展物性 &amp; ENCUT/k 收敛扫描</h4>
+                            <p className="viz-analysis-hint">
+                              扫描路径相对于 pyserver 主机（默认同步终端当前目录）。能带/DOS/声子为文件检测与摘要；收敛扫描对比相邻 ENCUT 或 k 点下 C11 变化。
+                            </p>
+                            <label className="field">
+                              扫描目录
+                              <input
+                                value={analysisScanDir}
+                                onChange={(e) => setAnalysisScanDir(e.target.value)}
+                                placeholder="."
+                              />
+                            </label>
+                            <div className="viz-terminal-import-actions row">
+                              <button type="button" className="btn secondary" onClick={() => void runExtendedPropsScan('all')}>
+                                扫描扩展物性
+                              </button>
+                              <button type="button" className="btn secondary" onClick={() => void runExtendedPropsScan('band_structure')}>
+                                仅能带
+                              </button>
+                              <button type="button" className="btn secondary" onClick={() => void runExtendedPropsScan('dos')}>
+                                仅 DOS
+                              </button>
+                              <button type="button" className="btn secondary" onClick={() => void runExtendedPropsScan('phonon')}>
+                                仅声子
+                              </button>
+                              <button type="button" className="btn" onClick={() => void runConvergenceScan()}>
+                                ENCUT·k 收敛扫描
+                              </button>
+                            </div>
+                            {extPropsResult ? (
+                              <details open={extPropsResult.startsWith('扫描失败')}>
+                                <summary>扩展物性结果</summary>
+                                <pre className="viz-outcar-preview">{extPropsResult}</pre>
+                              </details>
+                            ) : null}
+                            {convergenceResult ? (
+                              <details open={convergenceResult.startsWith('扫描失败') || convergenceResult.includes('"converged": false')}>
+                                <summary>收敛扫描结果</summary>
+                                <pre className="viz-outcar-preview">{convergenceResult}</pre>
+                              </details>
+                            ) : null}
+                          </div>
                         </div>
                       ) : null}
                       <div className="viz-terminal-console-body">
@@ -2857,9 +3056,31 @@ export function VisualizationPage() {
               ) : (
                 <p className="status">请选择材料后显示关键可视化数据</p>
               )}
-              <button className="btn secondary" onClick={generateSidebarLattice} disabled={!selectedMaterial} style={{ marginTop: 8 }}>
-                生成原胞图像
+              <button className="btn secondary" onClick={() => void generateSidebarLattice(false)} disabled={!selectedMaterial} style={{ marginTop: 8 }}>
+                ASE 生成原胞（按材料晶格常数）
               </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setPoscarPanelOpen((open) => !open)}
+                style={{ marginTop: 8, marginLeft: 8 }}
+              >
+                {poscarPanelOpen ? '收起 POSCAR' : '粘贴 POSCAR'}
+              </button>
+              {poscarPanelOpen ? (
+                <div className="viz-poscar-panel">
+                  <textarea
+                    className="viz-poscar-textarea"
+                    rows={8}
+                    value={poscarDraft}
+                    onChange={(e) => setPoscarDraft(e.target.value)}
+                    placeholder={'可选：粘贴 POSCAR / CONTCAR 全文，由 ASE 解析后渲染\n若留空则按上方按钮使用材料晶系 + 晶格常数'}
+                  />
+                  <button type="button" className="btn" onClick={() => void generateSidebarLattice(true)}>
+                    ASE 解析 POSCAR 并渲染
+                  </button>
+                </div>
+              ) : null}
               <div className="sidebar-lattice-canvas" ref={sidebarLatticeRef} />
               {sidebarLatticeStatus ? <p className="status">{sidebarLatticeStatus}</p> : null}
             </div>

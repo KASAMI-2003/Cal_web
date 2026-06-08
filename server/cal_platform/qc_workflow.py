@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Callable
 
@@ -34,6 +35,26 @@ def enrich_import_with_qc(result: dict[str, Any], work_dir: str | None = None) -
     if work_dir:
         dual = compare_dual_methods(work_dir, str(element))
 
+    convergence_scan = None
+    if work_dir:
+        try:
+            from cal_platform.convergence_scan import scan_convergence
+
+            parent = os.path.dirname(os.path.abspath(work_dir))
+            if parent and os.path.isdir(parent):
+                conv = scan_convergence(parent, threshold_gpa=2.0)
+                if conv.get('success') and len(conv.get('runs') or []) >= 2:
+                    convergence_scan = conv
+                    rec = conv.get('qc_suggestions') or {}
+                    if rec.get('k_convergence_tier') and not quality.get('k_convergence_tier'):
+                        quality['k_convergence_tier'] = rec['k_convergence_tier']
+                    if rec.get('encut') and not calc_meta.get('encut'):
+                        calc_meta['encut'] = str(rec['encut'])
+                    if rec.get('convergence_passed') is not None:
+                        quality['convergence_passed'] = rec['convergence_passed']
+        except Exception:
+            convergence_scan = None
+
     qc_status = 'auto_labeled'
     qc_steps = [
         {'step': 1, 'name': 'compute', 'status': 'done', 'at': time.strftime('%Y-%m-%d %H:%M:%S')},
@@ -56,6 +77,8 @@ def enrich_import_with_qc(result: dict[str, Any], work_dir: str | None = None) -
     result['quality'] = quality
     result['mare_report'] = mare
     result['dual_method'] = dual
+    if convergence_scan:
+        result['convergence_scan'] = convergence_scan
     result['qc_workflow'] = {
         'status': qc_status,
         'steps': qc_steps,
@@ -63,6 +86,7 @@ def enrich_import_with_qc(result: dict[str, Any], work_dir: str | None = None) -
         'mouhat_passed': (result.get('stability') or {}).get('mouhat_passed'),
         'mare_pct': mare.get('mare_pct'),
         'dual_method_passed': (dual or {}).get('passed'),
+        'convergence_passed': (convergence_scan or {}).get('analysis', {}).get('converged'),
     }
     result['db_data'] = dict(result.get('db_data') or {})
     if mare.get('label'):

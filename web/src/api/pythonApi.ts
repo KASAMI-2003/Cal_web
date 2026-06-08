@@ -17,6 +17,10 @@ import type {
   UploadDatResponse,
   VaspImportRequest,
   VaspImportResponse,
+  CreateLatticePictureRequest,
+  CreateLatticePictureResponse,
+  ExtendedPropertiesResponse,
+  ConvergenceScanResponse,
 } from '../types/contracts';
 
 const pythonBaseUrl = import.meta.env.VITE_PYTHON_API_ORIGIN || undefined;
@@ -99,8 +103,25 @@ export const pythonApi = {
       `/api/outcar_tail?dir=${encodeURIComponent(dir)}`,
       { baseUrl: pythonBaseUrl },
     ),
-  extendedProperties: () =>
-    requestJson<{ modules: string[]; status: string; message: string }>('/api/extended_properties', {
+  extendedProperties: (workDir?: string, module = 'all') => {
+    const params = new URLSearchParams();
+    if (workDir) params.set('work_dir', workDir);
+    if (module) params.set('module', module);
+    const q = params.toString();
+    return requestJson<ExtendedPropertiesResponse>(q ? `/api/extended_properties?${q}` : '/api/extended_properties', {
+      baseUrl: pythonBaseUrl,
+    });
+  },
+  scanExtendedProperties: (body: { work_dir: string; module?: string }) =>
+    requestJson<ExtendedPropertiesResponse, { work_dir: string; module?: string }>('/api/extended_properties/scan', {
+      method: 'POST',
+      body,
+      baseUrl: pythonBaseUrl,
+    }),
+  scanConvergence: (body: { root_dir: string; threshold_gpa?: number }) =>
+    requestJson<ConvergenceScanResponse, { root_dir: string; threshold_gpa?: number }>('/api/convergence/scan', {
+      method: 'POST',
+      body,
       baseUrl: pythonBaseUrl,
     }),
   fedorovCrosscheck: (symbol: string) =>
@@ -128,8 +149,8 @@ export const pythonApi = {
       body,
       baseUrl: pythonBaseUrl,
     }),
-  createLatticePicture: (body: { lattice_const: string }) =>
-    requestJson<{ points?: unknown[]; connections?: unknown[] }, { lattice_const: string }>('/create_lattice_picture', {
+  createLatticePicture: (body: CreateLatticePictureRequest) =>
+    requestJson<CreateLatticePictureResponse, CreateLatticePictureRequest>('/create_lattice_picture', {
       method: 'POST',
       body,
       baseUrl: pythonBaseUrl,

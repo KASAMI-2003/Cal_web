@@ -15,11 +15,7 @@ import mysql.connector
 from mysql.connector import Error
 import numpy as np
 from ase import Atoms
-from ase.lattice.hexagonal import HexagonalClosedPacked
 from ase.visualize import view
-from ase.neighborlist import NeighborList
-from ase import Atoms
-from ase.lattice.cubic import BodyCenteredCubic
 import os
 
 # 无图形界面环境（常见 Linux 服务器）下避免 matplotlib 选用需要 Tk/Qt 的后端
@@ -849,19 +845,25 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
         elif path == '/api/extended_properties':
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            work_dir = (qs.get('work_dir') or qs.get('dir') or [None])[0]
+            module = (qs.get('module') or ['all'])[0]
+            from cal_platform.extended_properties import MODULES, scan_extended_properties
+
+            if work_dir:
+                payload = scan_extended_properties(work_dir, module)
+            else:
+                payload = {
+                    'status': 'ready',
+                    'registered': list(MODULES),
+                    'modules': ['band_structure', 'dos', 'phonon'],
+                    'message': '请提供 ?work_dir= 或使用 POST /api/extended_properties/scan',
+                }
             self.send_response(200)
             self.send_header('Content-type', 'application/json; charset=utf-8')
             self.end_headers()
-            self.wfile.write(
-                json.dumps(
-                    {
-                        'modules': ['band_structure', 'dos', 'phonon'],
-                        'status': 'reserved',
-                        'message': '扩展物性模块接口已预留，待接入 VASP/phonopy 输出',
-                    },
-                    ensure_ascii=False,
-                ).encode('utf-8')
-            )
+            self.wfile.write(json.dumps(_to_json_serializable(payload), ensure_ascii=False).encode('utf-8'))
         elif path == '/api/digital_twin/capabilities':
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
@@ -1044,6 +1046,31 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
 
+            elif path == '/api/extended_properties/scan':
+                from cal_platform.extended_properties import scan_extended_properties
+
+                work_dir = (data.get('work_dir') or data.get('dir') or '').strip()
+                module = (data.get('module') or 'all').strip()
+                payload = scan_extended_properties(work_dir or None, module)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(_to_json_serializable(payload), ensure_ascii=False).encode('utf-8'))
+
+            elif path == '/api/convergence/scan':
+                from cal_platform.convergence_scan import scan_convergence
+
+                root_dir = (data.get('root_dir') or data.get('work_dir') or data.get('dir') or '').strip()
+                try:
+                    threshold = float(data.get('threshold_gpa', 2.0))
+                except (TypeError, ValueError):
+                    threshold = 2.0
+                payload = scan_convergence(root_dir or None, threshold_gpa=threshold)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(_to_json_serializable(payload), ensure_ascii=False).encode('utf-8'))
+
             elif path == '/api/data_fit/link_compound':
                 from cal_platform.auth_jwt import require_auth
 
@@ -1183,94 +1210,75 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({'success': False, 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
 
             elif path == '/create_lattice_picture':
-                lattice_const = data.get('lattice_const', 'fcc')
-                lattice_data = create_lattice_picture(lattice_const)
+                try:
+                    from cal_platform.lattice_builder import create_lattice_picture as build_lattice_mesh
 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps(lattice_data).encode('utf-8'))
+                    def _lattice_float(key: str):
+                        v = data.get(key)
+                        if v in (None, ''):
+                            return None
+                        try:
+                            return float(v)
+                        except (TypeError, ValueError):
+                            return None
+
+                    supercell = data.get('supercell')
+                    if isinstance(supercell, list) and len(supercell) == 3:
+                        sc = [int(x) for x in supercell]
+                    else:
+                        sc = None
+
+                    lattice_data = build_lattice_mesh(
+                        structure=data.get('lattice_const') or data.get('structure') or 'fcc',
+                        lattice_a=_lattice_float('lattice_a'),
+                        lattice_b=_lattice_float('lattice_b'),
+                        lattice_c=_lattice_float('lattice_c'),
+                        element=(data.get('element') or data.get('symbol') or '').strip() or None,
+                        poscar=data.get('poscar') or data.get('poscar_text'),
+                        supercell=sc,
+                    )
+
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(
+                        json.dumps(_to_json_serializable(lattice_data), ensure_ascii=False).encode('utf-8')
+                    )
+                except ValueError as e:
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(
+                        json.dumps(
+                            {'success': False, 'error': str(e), 'points': [], 'connections': []},
+                            ensure_ascii=False,
+                        ).encode('utf-8')
+                    )
+                except Exception as e:
+                    logging.exception('create_lattice_picture: %s', e)
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(
+                        json.dumps(
+                            {'success': False, 'error': str(e), 'points': [], 'connections': []},
+                            ensure_ascii=False,
+                        ).encode('utf-8')
+                    )
 
             elif path == '/api/data_fit':
                 try:
-                    from data_fitting.fit_funcs import polynomialFit, exponential, logarithmic, sine
-                    from data_fitting.fit_tools import get_fit_funcs
-                    from scipy.optimize import curve_fit
+                    from data_fitting.fit_engine import run_fit
 
                     x_data = [float(v) for v in data.get('x_data', [])]
                     y_data = [float(v) for v in data.get('y_data', [])]
                     fit_type = data.get('fit_type', 'Polynomial')
                     degree = int(data.get('degree', 2))
 
-                    if len(x_data) != len(y_data) or len(x_data) < 1:
-                        raise ValueError('数据长度不匹配或数据为空')
-
-                    row_count = len(x_data)
-                    coeffs = None
-                    fit_func_str = ''
-
-                    if fit_type == "Polynomial":
-                        if row_count <= degree:
-                            raise ValueError(f'数据点不足以支撑拟合{degree}次多项式')
-                        coeffs = polynomialFit(x_data, y_data, degree)
-                    elif fit_type == "Exponential":
-                        if row_count < 2:
-                            raise ValueError('数据点不足以支撑拟合指数函数')
-                        popt, _ = curve_fit(exponential, x_data, y_data)
-                        coeffs = list(popt)
-                    elif fit_type == "Logarithmic":
-                        if row_count < 2:
-                            raise ValueError('数据点不足以支撑拟合对数函数')
-                        popt, _ = curve_fit(logarithmic, x_data, y_data)
-                        coeffs = list(popt)
-                    elif fit_type == "Sine":
-                        if row_count < 3:
-                            raise ValueError('数据点不足以支撑拟合正弦函数')
-                        popt, _ = curve_fit(sine, x_data, y_data)
-                        coeffs = list(popt)
-                    else:
-                        raise ValueError('不支持的拟合类型')
-
-                    fit_func_str = get_fit_funcs(coeffs, fit_type)
-
-                    y_pred = []
-                    if fit_type == "Polynomial":
-                        y_pred = np.polyval(coeffs, x_data).tolist()
-                    elif fit_type == "Exponential":
-                        y_pred = [float(exponential(x, *coeffs)) for x in x_data]
-                    elif fit_type == "Logarithmic":
-                        y_pred = [float(logarithmic(x, *coeffs)) for x in x_data]
-                    else:
-                        y_pred = [float(sine(x, *coeffs)) for x in x_data]
-
-                    y_mean = float(np.mean(y_data))
-                    ss_res = sum((yi - ypi) ** 2 for yi, ypi in zip(y_data, y_pred))
-                    ss_tot = sum((yi - y_mean) ** 2 for yi in y_data)
-                    r_squared = float(1 - ss_res / ss_tot) if ss_tot != 0 else 0.0
-
-                    x_min = min(x_data)
-                    x_max = max(x_data)
-                    x_fit = np.linspace(x_min, x_max, 100).tolist()
-                    if fit_type == "Polynomial":
-                        y_fit = np.polyval(coeffs, x_fit).tolist()
-                    elif fit_type == "Exponential":
-                        y_fit = [float(exponential(x, *coeffs)) for x in x_fit]
-                    elif fit_type == "Logarithmic":
-                        y_fit = [float(logarithmic(x, *coeffs)) for x in x_fit]
-                    else:
-                        y_fit = [float(sine(x, *coeffs)) for x in x_fit]
-
+                    response = run_fit(x_data, y_data, fit_type, degree)
                     self.send_response(200)
                     self.send_header('Content-type', 'application/json')
                     self.end_headers()
-                    response = {
-                        'status': 'success',
-                        'fit_func': fit_func_str,
-                        'r_squared': round(r_squared, 6),
-                        'coeffs': [float(c) for c in coeffs],
-                        'x_fit': x_fit,
-                        'y_fit': y_fit
-                    }
                     self.wfile.write(json.dumps(response).encode('utf-8'))
                 except ValueError as e:
                     self.send_response(200)
@@ -2450,128 +2458,6 @@ def update_cell(database, table, column, condition, new_value):
     # 示例调用
     # 确保在调用时，condition 的格式正确
     #update_cell("Element","element_inf","具体分类","元素='Ne'","None")
-
-def create_lattice_picture(structure):
-    lattice_points1 = []
-    connections1 = []
-    if structure == "bcc":
-        # 创建BCC晶格结构
-        a = 1  # 晶格常数
-        bcc = BodyCenteredCubic(directions=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-                                size=(2, 2, 2),
-                                symbol='Fe',
-                                pbc=True)
-            # 将BCC Lattice转换为Atoms对象
-        positions = bcc.get_scaled_positions()  # 使用get_scaled_positions
-        cell = bcc.cell
-        numbers = bcc.numbers
-        symbols = bcc.get_chemical_symbols()
-
-        # 创建Atoms对象
-        atoms = Atoms(symbols=symbols,
-                      cell=cell,
-                      scaled_positions=positions,  # 传递标度位置
-                      pbc=True)
-
-        nl = NeighborList([1.5 * a] * len(atoms), skin=0.3, bothways=True, self_interaction=False)
-        nl.update(atoms)
-
-        # 转换后的位置
-        positions = atoms.get_positions()
-
-        # 转换为numpy数组以方便操作
-        lattice_points1 = np.array(positions)
-
-        # 定义连线规则
-        connections1 = [
-            (2, 6), (0, 2), (4, 6),
-            (0, 4), (0, 8), (2, 10),
-            (6, 14), (4, 12), (8, 12),
-            (12, 14), (10, 14), (8, 10)
-        ]
-    elif structure =="fcc":
-        # 更新晶胞大小（a为新的晶格常数）
-        a = 1.77  # 使用传入的晶格常数
-        # 创建基础晶格节点
-        lattice_points1 = [
-            [0, 0, 0],
-            [0, a, 0],
-            [a, 0, 0],
-            [0, 0, a],
-            [a, a, 0],
-            [0, a, a],
-            [a, 0, a],
-            [a, a, a],
-        ]
-
-        # 添加面心点
-        face_centers = [
-            [a / 2, a / 2, 0],
-            [a / 2, 0, a / 2],
-            [0, a / 2, a / 2],
-            [a / 2, a / 2, a],
-            [a / 2, a, a / 2],
-            [a, a / 2, a / 2],
-        ]
-
-        lattice_points1.extend(face_centers)
-
-        # 转换为numpy数组以方便操作
-        lattice_points1 = np.array(lattice_points1)
-
-        # 定义连线规则
-        connections1 = [
-            (0, 3), (0, 2), (0, 1),
-            (1, 5), (1, 4), (2, 6),
-            (2, 4), (6, 7), (3, 6),
-            (3, 5), (5, 7), (4, 7)
-        ]
-    elif structure == "hcp":
-        # 创建HCP结构
-        a = 1  # 晶格常数
-        hcp = HexagonalClosedPacked(symbol='Mg',
-                                    latticeconstant={'a': 3.2, 'c/a': 1.633},
-                                    size=(3, 3, 3))
-
-        # 将HCP Lattice转换为Atoms对象
-        positions = hcp.get_scaled_positions()  # 使用get_scaled_positions
-        cell = hcp.cell
-        numbers = hcp.numbers
-        symbols = hcp.get_chemical_symbols()
-
-        # 创建Atoms对象
-        atoms = Atoms(symbols=symbols,
-                      cell=cell,
-                      scaled_positions=positions,  # 传递标度位置
-                      pbc=True)
-
-        # 删除指定索引的原子
-        del atoms[35:53]
-        del atoms[35]
-
-        nl = NeighborList([1.5 * a] * len(atoms), skin=0.3, bothways=True, self_interaction=False)
-        nl.update(atoms)
-
-        # 转换后的位置
-        positions = atoms.get_positions()
-
-        # 转换为numpy数组以方便操作
-        lattice_points1 = np.array(positions)
-
-        # 定义连线规则
-        connections1 = [
-            (0, 2), (2, 10), (10, 16), (16, 14), (14, 6), (6, 0),
-            (1, 3), (3, 9), (9, 1),
-            (20, 28), (28, 34), (34, 32), (32, 24), (24, 18), (18, 20),
-            (18, 0), (20, 2), (28, 10), (34, 16), (32, 14), (24, 6)
-        ]
-
-    print(lattice_points1,connections1)
-    return {
-        "points": lattice_points1.tolist(),  # 返回晶格点
-        "connections": [list(conn) for conn in connections1]  # 确保返回的是列表
-    }
-import numpy as np
 
 def create_stiffness_tensor(C11, C12, C44, C13, matrix_type):
     if matrix_type == 'C':

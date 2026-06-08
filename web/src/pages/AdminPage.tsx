@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { pythonApi } from '../api/pythonApi';
 import { getAuthState } from '../auth/authStore';
-import type { DataInputApplication } from '../types/contracts';
+import type { ConvergenceScanResponse, DataInputApplication } from '../types/contracts';
 
 function formatDbPreview(data: Record<string, unknown> | undefined) {
   if (!data) return null;
@@ -149,11 +149,36 @@ export function AdminPage() {
                   {item.quality.k_convergence_tier ? (
                     <li>k 点收敛档位: {item.quality.k_convergence_tier}</li>
                   ) : null}
+                  {(item.quality as { encut?: number }).encut != null ? (
+                    <li>推荐 ENCUT: {(item.quality as { encut?: number }).encut} eV</li>
+                  ) : null}
+                  {(item.quality as { convergence_passed?: boolean }).convergence_passed != null ? (
+                    <li>
+                      ENCUT/k 收敛:{' '}
+                      {(item.quality as { convergence_passed?: boolean }).convergence_passed ? '通过' : '未通过'}
+                    </li>
+                  ) : null}
                   {item.quality.calc_exp_deviation_label ? (
                     <li>计算—实验偏差标签: {item.quality.calc_exp_deviation_label}</li>
                   ) : null}
                 </ul>
               </div>
+            ) : null}
+            {(item as { convergence_scan?: ConvergenceScanResponse }).convergence_scan ? (
+              <details className="vasp-quality-meta">
+                <summary>
+                  <strong>
+                    ENCUT/k 收敛扫描（
+                    {(item as { convergence_scan?: ConvergenceScanResponse }).convergence_scan?.analysis?.converged
+                      ? '已收敛'
+                      : '待确认'}
+                    ）
+                  </strong>
+                </summary>
+                <pre className="mono" style={{ fontSize: 11, maxHeight: 220, overflow: 'auto' }}>
+                  {JSON.stringify((item as { convergence_scan?: ConvergenceScanResponse }).convergence_scan, null, 2)}
+                </pre>
+              </details>
             ) : null}
             {(item as { mare_report?: { mare_pct?: number } }).mare_report?.mare_pct != null ? (
               <p className="mono">MARE: {(item as { mare_report?: { mare_pct?: number } }).mare_report!.mare_pct}%</p>

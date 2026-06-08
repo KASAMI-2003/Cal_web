@@ -100,11 +100,81 @@ export interface DataFitRequest {
 export interface DataFitResponse {
   status: ApiStatus;
   message?: string;
+  fit_type?: DataFitRequest['fit_type'];
+  degree?: number;
   fit_func?: string;
   r_squared?: number;
+  /** 拟合 RMSE，与应变—能量拟合残差口径一致 */
+  rmse?: number;
+  strain_fit_residual?: number;
   coeffs?: number[];
+  coeff_stderr?: number[] | null;
+  covariance_matrix?: number[][] | null;
+  uncertainty_note?: string;
   x_fit?: number[];
   y_fit?: number[];
+}
+
+export interface ExtendedPropertiesResponse {
+  status: string;
+  message?: string;
+  work_dir?: string;
+  registered?: string[];
+  modules?: Record<
+    string,
+    {
+      available?: boolean;
+      status?: string;
+      files?: Record<string, unknown>;
+      summary?: Record<string, unknown>;
+      curve?: { energy_eV?: number[]; dos?: number[] };
+    }
+  >;
+}
+
+export interface ConvergenceScanResponse {
+  success: boolean;
+  message?: string;
+  root_dir?: string;
+  sweep_type?: string;
+  threshold_GPa?: number;
+  runs?: Array<Record<string, unknown>>;
+  analysis?: {
+    converged?: boolean;
+    message?: string;
+    series?: Array<Record<string, unknown>>;
+    recommended?: Record<string, unknown>;
+  };
+  qc_suggestions?: Record<string, unknown>;
+  workflow_note?: string;
+}
+
+export interface CreateLatticePictureRequest {
+  lattice_const?: string;
+  structure?: string;
+  lattice_a?: number;
+  lattice_b?: number;
+  lattice_c?: number;
+  element?: string;
+  symbol?: string;
+  poscar?: string;
+  poscar_text?: string;
+  supercell?: [number, number, number];
+}
+
+export interface CreateLatticePictureResponse {
+  success?: boolean;
+  error?: string;
+  points?: number[][];
+  connections?: number[][];
+  elements?: string[];
+  lattice_a?: number;
+  lattice_b?: number;
+  lattice_c?: number;
+  n_atoms?: number;
+  source?: 'ase_bulk' | 'ase_poscar' | string;
+  structure?: string;
+  element?: string;
 }
 
 export interface TwinPropertyResponse {

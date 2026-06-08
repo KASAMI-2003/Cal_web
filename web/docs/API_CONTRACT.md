@@ -52,7 +52,9 @@ This file freezes backend contracts used by the TSX migration.
 - `POST /api/home_search` — parallel local + MP home search
 - `POST /api/data_fit/link_compound` — link fit result to compound (JWT optional)
 - `GET /api/outcar_tail?dir=` — OUTCAR tail preview
-- `GET /api/extended_properties` — band/DOS/phonon reserved
+- `GET /api/extended_properties?work_dir=&module=` — 能带/DOS/声子文件探测与摘要（`module`: all | band_structure | dos | phonon）
+- `POST /api/extended_properties/scan` — body `{ work_dir, module? }`
+- `POST /api/convergence/scan` — ENCUT/k 收敛扫描，body `{ root_dir, threshold_gpa? }`（默认 2 GPa）
 - `GET /api/digital_twin/metal_presets` — thesis metal Cij presets
 - `GET /api/digital_twin/fedorov_crosscheck?symbol=` — offline cross-check
 - Rust: `GET /auth/verify` — JWT validation; login returns `{ data: { token, username } }`
