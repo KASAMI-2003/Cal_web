@@ -13,8 +13,15 @@ curl -sf -X POST "http://127.0.0.1:3569/mysql_receive" \
   -d '{"element":"2U-Nb","text":"晶体结构"}' | head -c 200 && echo
 curl -sf -X POST "http://127.0.0.1:3569/page2_search" \
   -H 'Content-Type: application/json' \
-  -d '{"q":"Fe","fuzzy":true,"search_in":"name"}' | python3 -c "import sys,json; d=json.load(sys.stdin); mp=[m for m in d.get('materials',[]) if m.get('source')=='Materials Project']; print('page2 Fe MP:', len(mp))" 2>/dev/null || echo "page2 Fe MP: (需要 python3 解析)"
+  -d '{"q":"H","fuzzy":true,"search_in":"name"}' | python3 -c "import sys,json; d=json.load(sys.stdin); mp=[m for m in d.get('materials',[]) if 'Materials Project' in str(m.get('source',''))]; print('page2 H MP:', len(mp), 'mp_source:', d.get('mp_source'))" 2>/dev/null || echo "page2 H MP: (需要 python3 解析)"
+curl -sf -X POST "http://127.0.0.1:3569/page2_search" \
+  -H 'Content-Type: application/json' \
+  -d '{"q":"Fe","fuzzy":true,"search_in":"name"}' | python3 -c "import sys,json; d=json.load(sys.stdin); mp=[m for m in d.get('materials',[]) if 'Materials Project' in str(m.get('source',''))]; print('page2 Fe MP:', len(mp))" 2>/dev/null || echo "page2 Fe MP: (需要 python3 解析)"
+curl -sf "http://127.0.0.1:3569/api/data?element=Al&num_element=1&material_id=mp-134" | python3 -c "import sys,json; m=json.load(sys.stdin).get('message',[]); ok=any('Material ID:' in str(x) for x in m); err=any('MP-API' in str(x) for x in m); print('get_data single mp-134:', 'OK' if ok and not err else 'FAIL', m[0] if m else '')" 2>/dev/null || echo "get_data single: (需要 python3)"
 curl -sf "http://127.0.0.1:3569/api/data?element=Fe&num_element=1" | python3 -c "import sys,json; m=json.load(sys.stdin).get('message',[]); mp=sum(1 for x in m if str(x).startswith('Material ID:')); print('get_data Fe MP:', mp)" 2>/dev/null || echo "get_data Fe MP: (需要 python3 解析)"
+curl -sf -X POST "http://127.0.0.1:3569/create_lattice_picture" \
+  -H 'Content-Type: application/json' \
+  -d '{"lattice_const":"fcc","element":"Al","lattice_a":4.05}' | python3 -c "import sys,json; d=json.load(sys.stdin); pts=d.get('points') or []; print('create_lattice_picture:', 'OK' if len(pts)>0 else d.get('error','FAIL'))" 2>/dev/null || echo "create_lattice_picture: (需要 python3)"
 curl -sf -X POST "http://127.0.0.1:3569/api/data_fit" \
   -H 'Content-Type: application/json' \
   -d '{"x_data":[1,2,3],"y_data":[1,4,9],"fit_type":"Polynomial","degree":2}' | head -c 200 && echo

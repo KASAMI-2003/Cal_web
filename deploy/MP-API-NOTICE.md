@@ -1,8 +1,7 @@
-# MP-API 生产环境暂不可用（临时备忘）
+# MP-API 生产环境
 
-**状态**：待处理（2026-05-21）  
-**影响域名**：`https://calweb.physedu.top`  
-**不影响**：本地 `npm run dev` + 本机 `pyserver.py`
+**状态**：若已解封并配置 `MP_API_KEY`，请同步最新代码后执行 `bash deploy/verify-api.sh`。  
+**同步清单**：见 **[SERVER-SYNC.md](SERVER-SYNC.md)**（本地跑通但线上不行 = 未部署最新 `pyserver.py` + `web/dist`）。
 
 ## 现象
 

@@ -260,9 +260,9 @@ function parseFloatLike(value: unknown): number | null {
 }
 
 function parseLatticeAxes(data: Record<string, unknown>): { a: number | null; b: number | null; c: number | null } {
-  const fromA = parseFloatLike(data.晶格常数a ?? data['晶格常数a']);
-  const fromB = parseFloatLike(data.晶格常数b ?? data['晶格常数b']);
-  const fromC = parseFloatLike(data.晶格常数c ?? data['晶格常数c']);
+  const fromA = parseFloatLike(data.晶格常数a ?? data['晶格常数a'] ?? data.a);
+  const fromB = parseFloatLike(data.晶格常数b ?? data['晶格常数b'] ?? data.b);
+  const fromC = parseFloatLike(data.晶格常数c ?? data['晶格常数c'] ?? data.c);
   if (fromA && fromB && fromC) {
     return { a: fromA, b: fromB, c: fromC };
   }
@@ -2117,8 +2117,9 @@ export function VisualizationPage() {
     setTransferStatus(`下载请求已发送：${remotePath}`);
   }
 
-  async function generateSidebarLattice(fromPoscar = false) {
-    if (!selectedMaterial && !fromPoscar) {
+  async function generateSidebarLattice(fromPoscar = false, materialOverride?: MaterialOption) {
+    const activeMaterial = materialOverride ?? selectedMaterial;
+    if (!activeMaterial && !fromPoscar) {
       setSidebarLatticeStatus('请先选择数据');
       return;
     }
@@ -2157,7 +2158,7 @@ export function VisualizationPage() {
       return;
     }
 
-    const data = selectedMaterial!.data;
+    const data = activeMaterial!.data;
     const positions = Array.isArray(data.positions) ? (data.positions as unknown[]) : [];
     const connections = Array.isArray(data.connections) ? (data.connections as unknown[]) : [];
     const parsedPositions = positions
@@ -2167,7 +2168,7 @@ export function VisualizationPage() {
       .map((row) => (Array.isArray(row) ? row.map((v) => Number(v)) : []))
       .filter((row) => row.length === 2 && row.every((v) => Number.isFinite(v))) as number[][];
     const formulaSymbols =
-      String(data.化学式 ?? data.formula_pretty ?? data.db_formula ?? selectedMaterial!.title)
+      String(data.化学式 ?? data.formula_pretty ?? data.db_formula ?? activeMaterial!.title)
         .match(/[A-Z][a-z]?/g)
         ?.filter(Boolean) ?? ['default'];
     const axes = parseLatticeAxes(data);
@@ -2197,7 +2198,7 @@ export function VisualizationPage() {
         element: primaryElement,
         space_group_no: parseFloatLike(data.space_group_no) ?? undefined,
         notes: String(data.notes ?? '') || undefined,
-        material_name: String(data.material_name ?? data.db_formula ?? selectedMaterial!.title) || undefined,
+        material_name: String(data.material_name ?? data.db_formula ?? activeMaterial!.title) || undefined,
       });
       const mesh = parseLatticeMeshResponse(generated);
       if (mesh.points.length === 0) {
@@ -2343,13 +2344,22 @@ export function VisualizationPage() {
         return;
       }
       const mpOptions = parseMpApiMaterials(mpLines);
-      const computedOne =
+      const computedOneRaw =
         mpOptions.find((opt) => normalizeMpApiId(opt.id) === mpId) ?? (mpOptions.length === 1 ? mpOptions[0] : null);
-      if (!computedOne) {
+      if (!computedOneRaw) {
         setComputePhase('error');
         setStatus(`未能获取 ${mpId} 的计算结果`);
         return;
       }
+      const computedOne: MaterialOption = {
+        ...computedOneRaw,
+        data: {
+          ...selected.data,
+          ...computedOneRaw.data,
+          positions: computedOneRaw.data.positions ?? selected.data.positions,
+          connections: computedOneRaw.data.connections ?? selected.data.connections,
+        },
+      };
 
       const others = materialOptionsRef.current.filter(
         (opt) => normalizeMpApiId(opt.id) !== normalizeMpApiId(computedOne.id),
@@ -2360,6 +2370,7 @@ export function VisualizationPage() {
       setComputedMaterialIds((prev) => new Set(prev).add(materialId));
       setComputePhase('done');
       setStatus(`计算完成：${computedOne.title}（${normalizeMpApiId(computedOne.id)}）`);
+      void generateSidebarLattice(false, computedOne);
     } catch (error) {
       setComputePhase('error');
       setStatus(`计算失败: ${(error as Error).message}`);
