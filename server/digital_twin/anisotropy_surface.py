@@ -214,6 +214,25 @@ def _poisson_nu_max_surface_numpy(S_fedorov, n_phi: int, n_theta: int, n_chi: in
     return phi, theta, M_max
 
 
+def _resolve_fallback_alloy_row(
+    alloy_row: dict | None,
+    fallback_metal: str | None,
+) -> tuple[dict | None, str]:
+    """上传成分表优先；否则用金属预设（仅 HTEM 不可用时的回退）。"""
+    if alloy_row is not None:
+        return alloy_row, 'alloy_table'
+    sym = (fallback_metal or os.environ.get('TWIN_METAL_SYMBOL') or 'Cu').strip()
+    try:
+        from digital_twin.metal_presets import alloy_row_from_preset
+
+        row = alloy_row_from_preset(sym)
+        if row:
+            return row, f'metal_preset_{sym.capitalize()}'
+    except Exception:
+        pass
+    return None, 'numpy_fallback_si'
+
+
 def _compute_anisotropy_numpy_fallback(
     T_K: float,
     P_GPa: float,
@@ -221,7 +240,9 @@ def _compute_anisotropy_numpy_fallback(
     n_theta: int,
     n_chi: int,
     alloy_row: dict | None = None,
+    fallback_metal: str | None = None,
 ):
+    alloy_row, model_tag = _resolve_fallback_alloy_row(alloy_row, fallback_metal)
     Eobj = _build_elasticity_numpy(alloy_row, T_K, P_GPa)
     S_fedorov = Eobj.S_matrix_Fedorov
     phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
@@ -233,7 +254,7 @@ def _compute_anisotropy_numpy_fallback(
         'n_phi': n_phi,
         'n_theta': n_theta,
         'n_chi': n_chi,
-        'model': 'numpy_fallback_metal' if alloy_row is None else 'numpy_alloy',
+        'model': model_tag,
         'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
         'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
         'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),
@@ -250,16 +271,22 @@ def _compute_anisotropy_htem(
 ):
     if alloy_row is not None:
         rho = float(alloy_row.get("rho") or 6.5)
-        Eobj = _elasticity_from_alloy_cij(
+        crystal = alloy_row.get("crystal_system") or "cubic"
+        Eobj = _NumpyElasticity(
             float(alloy_row["c11"]),
             float(alloy_row["c12"]),
             float(alloy_row["c44"]),
             rho,
             T_K,
             P_GPa,
+            crystal_system=crystal,
+            c13=alloy_row.get("c13"),
+            c33=alloy_row.get("c33"),
         )
+        model_tag = f"alloy_table:{alloy_row.get('label', '')}"
     else:
         Eobj = build_elasticity_at_tp(T_K, P_GPa)
+        model_tag = 'HTEM_SAM'
     S_fedorov = Eobj.S_matrix_Fedorov
 
     phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
@@ -272,7 +299,7 @@ def _compute_anisotropy_htem(
         'n_phi': n_phi,
         'n_theta': n_theta,
         'n_chi': n_chi,
-        'model': 'HTEM_SAM',
+        'model': model_tag,
         'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
         'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
         'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),
@@ -459,11 +486,13 @@ def compute_anisotropy_bundle(
     n_theta: int = 72,
     n_chi: int = 48,
     alloy_row: dict | None = None,
+    fallback_metal: str | None = None,
 ):
     """
     返回 E、nu_max、v_l 三套球面参数化数据（与论文图一致：r(θ,φ)=物理量）。
-    alloy_row：含 c11,c12,c44,rho（可选，缺省 rho=6.5 g/cm³）时走成分表，不经 SAM。
-    HTEM 可用时走 SAM/HTEM；否则自动回退 numpy 立方公式（Si 参考常数或 alloy_row）。
+    alloy_row：上传成分表（含 c11,c12,c44,rho）时走表中 c_ij，不经 SAM。
+    fallback_metal：仅 HTEM 不可用时的金属预设回退（Cu/Al/Ni/Ti），不得覆盖 SAM。
+    HTEM 可用且无 alloy_row 时走 Si SAM；否则自动回退 numpy。
     """
     n_phi = max(12, min(96, int(n_phi)))
     n_theta = max(24, min(144, int(n_theta)))
@@ -476,5 +505,11 @@ def compute_anisotropy_bundle(
             logging.warning('HTEM 各向异性曲面失败，回退 numpy: %s', e)
 
     return _compute_anisotropy_numpy_fallback(
-        T_K, P_GPa, n_phi, n_theta, n_chi, alloy_row=alloy_row
+        T_K,
+        P_GPa,
+        n_phi,
+        n_theta,
+        n_chi,
+        alloy_row=alloy_row,
+        fallback_metal=fallback_metal,
     )

@@ -792,16 +792,15 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 if _compute_anisotropy_bundle is None:
                     raise RuntimeError('anisotropy_surface 模块不可用')
                 alloy_row, _ent = _twin_resolve_alloy_row(qs)
-                metal_sym = (qs.get('metal') or qs.get('element') or [None])[0]
-                if metal_sym and not alloy_row:
-                    try:
-                        from digital_twin.metal_presets import alloy_row_from_preset
-
-                        alloy_row = alloy_row_from_preset(str(metal_sym))
-                    except Exception:
-                        pass
+                fallback_metal = (qs.get('metal') or qs.get('element') or [None])[0]
                 payload = _compute_anisotropy_bundle(
-                    T_K, P_GPa, n_phi, n_theta, n_chi, alloy_row=alloy_row
+                    T_K,
+                    P_GPa,
+                    n_phi,
+                    n_theta,
+                    n_chi,
+                    alloy_row=alloy_row,
+                    fallback_metal=str(fallback_metal) if fallback_metal else None,
                 )
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json; charset=utf-8')

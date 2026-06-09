@@ -500,8 +500,12 @@ export function DigitalTwinPage() {
         setSurfaceData(json);
         if (!params?.silent) {
           const model = String(json?.model ?? '');
-          if (model === 'numpy_fallback_si') {
-            setStatus('警告：未启用 HTEM SAM，当前为占位曲面。请在服务器执行 git pull 并确认 server/digital_twin/HTEM-main 存在后重启 calweb-backend。');
+          if (model === 'numpy_fallback_si' || model.startsWith('metal_preset_')) {
+            setStatus(
+              model.startsWith('metal_preset_')
+                ? `已加载各向异性曲面（HTEM 不可用，使用金属预设 ${model.replace('metal_preset_', '')}）`
+                : '警告：未启用 HTEM SAM，当前为占位曲面。请在服务器执行 git pull 并确认 server/digital_twin/HTEM-main 存在后重启 calweb-backend。',
+            );
           } else {
             setStatus(`已加载各向异性曲面${model ? ` (${model})` : ''}`);
           }
@@ -653,6 +657,7 @@ export function DigitalTwinPage() {
       setConfigSwitching(true);
       setStatus('正在恢复默认 HTEM 并加载曲面...');
       setSurfaceData(null);
+      localStorage.removeItem('twin_metal_symbol');
       const response = await pythonApi.twinActivateDat({
         username: apiUsername,
         twin_file: undefined,
@@ -989,12 +994,23 @@ export function DigitalTwinPage() {
               className="btn secondary"
               onClick={() => {
                 localStorage.setItem('twin_metal_symbol', sym);
-                setStatus(`已切换金属预设 ${sym}（回退曲面时使用论文 VASP 数据）`);
+                setStatus(`已设置金属回退预设 ${sym}（仅 HTEM 不可用时生效；默认仍用 Si SAM）`);
               }}
             >
               金属 {sym}
             </button>
           ))}
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => {
+              localStorage.removeItem('twin_metal_symbol');
+              setStatus('已清除金属预设，默认使用 HTEM Si SAM');
+              void fetchSurface({ cacheBust: Date.now() });
+            }}
+          >
+            默认 Si SAM
+          </button>
           <button
             type="button"
             className="btn secondary"
