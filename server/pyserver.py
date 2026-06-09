@@ -1484,6 +1484,50 @@ def _get_mp_api_key():
     return os.environ.get('MP_API_KEY', 'ROFXH1OkrD7GvcFFOasGetGk0asrzOE4').strip()
 
 
+def _mp_open_rester():
+    """MP 新 material_id（如 mp-aaacsndk）会触发 emmet SummaryDoc 校验失败，需关闭 document model。"""
+    return MPRester(_get_mp_api_key(), use_document_model=False)
+
+
+def _mp_doc_get(doc, key, default=None):
+    if isinstance(doc, dict):
+        return doc.get(key, default)
+    return getattr(doc, key, default)
+
+
+def _mp_doc_crystal_system(doc):
+    sym = _mp_doc_get(doc, 'symmetry')
+    if sym is None:
+        return None
+    if isinstance(sym, dict):
+        return sym.get('crystal_system')
+    cs = getattr(sym, 'crystal_system', None)
+    return str(cs) if cs is not None else None
+
+
+def _mp_doc_symmetry_field(doc, field):
+    sym = _mp_doc_get(doc, 'symmetry')
+    if sym is None:
+        return None
+    if isinstance(sym, dict):
+        return sym.get(field)
+    return getattr(sym, field, None)
+
+
+def _mp_doc_structure(doc):
+    structure = _mp_doc_get(doc, 'structure')
+    if structure is not None and hasattr(structure, 'lattice'):
+        return structure
+    return None
+
+
+def _normalize_mp_id(raw_id):
+    mid = str(raw_id or '').strip()
+    if mid and not mid.startswith('mp-'):
+        mid = f'mp-{mid}'
+    return mid
+
+
 def _build_chemsys_from_element(element):
     """与主页面/pyserver.py get_data 一致的 chemsys 构造。"""
     element = (element or '').strip()
@@ -1573,15 +1617,15 @@ def get_data(element, num_element, material_id=None):
         logging.info("==================== 开始获取数据 ====================")
         logging.info(f"请求元素: {element}, 元素数量: {num_element}, material_id: {material_id}")
 
-        with MPRester(_get_mp_api_key()) as mpr:
+        with _mp_open_rester() as mpr:
             chemsys = _build_chemsys_from_element(element)
             logging.info(f"处理后的化学式: {chemsys}")
 
             docs = []
+            requested_mid = None
             if material_id:
-                mid = str(material_id).strip()
-                if mid and not mid.startswith('mp-'):
-                    mid = f'mp-{mid}'
+                requested_mid = _normalize_mp_id(material_id)
+                mid = requested_mid
                 logging.info("正在查询 Materials Project API（单条）: %s", mid)
                 try:
                     docs = list(
@@ -1607,35 +1651,38 @@ def get_data(element, num_element, material_id=None):
             result_list = []
             for doc in docs:
                 try:
-                    logging.info(f"处理材料数据: {doc.material_id}")
-                    result_list.append("Material ID: {}".format(doc.material_id))
-                    result_list.append("化学式: {}".format(doc.formula_pretty))
-                    if getattr(doc, "elements", None):
+                    display_id = requested_mid or _mp_doc_get(doc, 'material_id') or _mp_doc_get(doc, 'mpid')
+                    logging.info(f"处理材料数据: {display_id}")
+                    result_list.append("Material ID: {}".format(display_id))
+                    result_list.append("化学式: {}".format(_mp_doc_get(doc, 'formula_pretty')))
+                    elements = _mp_doc_get(doc, 'elements')
+                    if elements:
                         try:
-                            elems_sorted = sorted(str(el) for el in doc.elements)
+                            elems_sorted = sorted(str(el) for el in elements)
                             result_list.append("元素: {}".format(" ".join(elems_sorted)))
                         except Exception:
-                            result_list.append("元素: {}".format(doc.elements))
-                    if getattr(doc, "nelements", None) is not None:
-                        result_list.append("元素种类数: {}".format(doc.nelements))
+                            result_list.append("元素: {}".format(elements))
+                    nelements = _mp_doc_get(doc, 'nelements')
+                    if nelements is not None:
+                        result_list.append("元素种类数: {}".format(nelements))
                     result_list.append("晶格温度: 0K")
                     
                     # 添加结构信息
-                    if hasattr(doc, 'structure'):
+                    structure = _mp_doc_structure(doc)
+                    if structure is not None:
                         logging.info(f"处理晶体结构数据...")
                         result_list.append("\n结构信息:")
-                        # 获取晶格系统
-                        if hasattr(doc, 'symmetry'):
-                            crystal_system = doc.symmetry.crystal_system
+                        crystal_system = _mp_doc_crystal_system(doc)
+                        if crystal_system:
                             result_list.append("晶体结构: {}".format(crystal_system))
                         else:
                             result_list.append("晶体结构: NONE DATA")
                         
                         # 获取晶格参数
                         try:
-                            a = doc.structure.lattice.a
-                            b = doc.structure.lattice.b
-                            c = doc.structure.lattice.c
+                            a = structure.lattice.a
+                            b = structure.lattice.b
+                            c = structure.lattice.c
                             result_list.append("晶格参数: a={:.3f} b={:.3f} c={:.3f}".format(a, b, c))
                             logging.info(f"晶格参数: a={a:.3f}, b={b:.3f}, c={c:.3f}")
                             # 添加单独的晶格参数，方便前端解析
@@ -1644,7 +1691,7 @@ def get_data(element, num_element, material_id=None):
                             result_list.append("晶格常数c: {:.3f}".format(c))
 
                             # 添加原子位置信息
-                            sites = doc.structure.sites
+                            sites = structure.sites
                             result_list.append("原子位置:")
                             positions = []
                             for i, site in enumerate(sites):
@@ -1677,11 +1724,12 @@ def get_data(element, num_element, material_id=None):
                         result_list.append("晶格参数: NONE DATA")
                     
                     # 添加弹性常数和杨氏模量
-                    if hasattr(doc, 'bulk_modulus') and hasattr(doc, 'shear_modulus'):
+                    bulk_modulus = _mp_doc_get(doc, 'bulk_modulus')
+                    shear_modulus = _mp_doc_get(doc, 'shear_modulus')
+                    if bulk_modulus is not None and shear_modulus is not None:
                         logging.info("计算弹性常数和杨氏模量...")
                         try:
                             # 检查并获取体积模量
-                            bulk_modulus = doc.bulk_modulus
                             if isinstance(bulk_modulus, dict):
                                 logging.info("体积模量是字典类型，使用VRH平均值")
                                 if 'vrh' in bulk_modulus and bulk_modulus['vrh'] is not None:
@@ -1695,7 +1743,6 @@ def get_data(element, num_element, material_id=None):
                                     bulk_modulus = None
 
                             # 检查并获取剪切模量
-                            shear_modulus = doc.shear_modulus
                             if isinstance(shear_modulus, dict):
                                 logging.info("剪切模量是字典类型，使用VRH平均值")
                                 if 'vrh' in shear_modulus and shear_modulus['vrh'] is not None:
@@ -1760,49 +1807,57 @@ def get_data(element, num_element, material_id=None):
                         result_list.append("弹性刚度常数C12: NONE DATA (无数据)")
                         result_list.append("杨氏模量E-H: NONE DATA (无数据)")
                     
-                    if hasattr(doc, 'formation_energy_per_atom'):
-                        result_list.append("形成能: {:.3f} eV/atom".format(doc.formation_energy_per_atom))
+                    fe = _mp_doc_get(doc, 'formation_energy_per_atom')
+                    if fe is not None:
+                        result_list.append("形成能: {:.3f} eV/atom".format(fe))
                     else:
                         result_list.append("形成能: NONE DATA")
                     
-                    if hasattr(doc, 'energy_above_hull'):
-                        result_list.append("相对稳定性能量: {:.3f} eV/atom".format(doc.energy_above_hull))
+                    e_hull = _mp_doc_get(doc, 'energy_above_hull')
+                    if e_hull is not None:
+                        result_list.append("相对稳定性能量: {:.3f} eV/atom".format(e_hull))
                     else:
                         result_list.append("相对稳定性能量: NONE DATA")
                     
-                    if hasattr(doc, 'is_stable'):
-                        result_list.append("是否稳定: {}".format("是" if doc.is_stable else "否"))
+                    is_stable = _mp_doc_get(doc, 'is_stable')
+                    if is_stable is not None:
+                        result_list.append("是否稳定: {}".format("是" if is_stable else "否"))
                     else:
                         result_list.append("是否稳定: NONE DATA")
                     
-                    if hasattr(doc, 'band_gap'):
-                        result_list.append("能隙: {:.3f} eV".format(doc.band_gap))
+                    band_gap = _mp_doc_get(doc, 'band_gap')
+                    if band_gap is not None:
+                        result_list.append("能隙: {:.3f} eV".format(band_gap))
                     else:
                         result_list.append("能隙: NONE DATA")
                     
-                    if hasattr(doc, 'is_metal'):
-                        result_list.append("是否为金属: {}".format("是" if doc.is_metal else "否"))
+                    is_metal = _mp_doc_get(doc, 'is_metal')
+                    if is_metal is not None:
+                        result_list.append("是否为金属: {}".format("是" if is_metal else "否"))
                     else:
                         result_list.append("是否为金属: NONE DATA")
                     
-                    if hasattr(doc, 'total_magnetization'):
-                        result_list.append("总磁矩: {:.2f} μB".format(doc.total_magnetization))
+                    mag = _mp_doc_get(doc, 'total_magnetization')
+                    if mag is not None:
+                        result_list.append("总磁矩: {:.2f} μB".format(mag))
                     else:
                         result_list.append("总磁矩: NONE DATA")
                     
-                    if hasattr(doc, 'symmetry'):
-                        result_list.append("晶体结构: {}".format(doc.symmetry.crystal_system))
-                        result_list.append("空间群: {}".format(doc.symmetry.symbol))
-                        result_list.append("点群: {}".format(doc.symmetry.point_group))
+                    crystal_system = _mp_doc_crystal_system(doc)
+                    if crystal_system:
+                        result_list.append("晶体结构: {}".format(crystal_system))
+                        result_list.append("空间群: {}".format(_mp_doc_symmetry_field(doc, 'symbol') or 'NONE DATA'))
+                        result_list.append("点群: {}".format(_mp_doc_symmetry_field(doc, 'point_group') or 'NONE DATA'))
                     else:
                         result_list.append("晶体结构: NONE DATA")
                         result_list.append("空间群: NONE DATA")
                         result_list.append("点群: NONE DATA")
                     
                     result_list.append("---")
-                    logging.info(f"材料 {doc.material_id} 数据处理完成")
+                    logging.info(f"材料 {display_id} 数据处理完成")
                 except Exception as e:
-                    logging.error(f"处理材料 {doc.material_id} 时发生错误: {str(e)}")
+                    err_id = requested_mid or _mp_doc_get(doc, 'material_id', 'unknown')
+                    logging.error(f"处理材料 {err_id} 时发生错误: {str(e)}")
                     continue
             
             if result_list:
@@ -2366,7 +2421,7 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
     limit = 1000
 
     try:
-        with MPRester(_get_mp_api_key()) as mpr:
+        with _mp_open_rester() as mpr:
             crystal_map = {"fcc": "cubic", "bcc": "cubic", "立方": "cubic", "六方": "hexagonal", "四方": "tetragonal", "正交": "orthorhombic", "单斜": "monoclinic"}
             crystal_system = crystal_map.get(q_lower) or (q_lower if q_lower in ("cubic", "hexagonal", "tetragonal", "orthorhombic", "monoclinic", "trigonal", "triclinic") else None)
 
@@ -2403,17 +2458,17 @@ def page2_search_mp(query, fuzzy=True, case_sensitive=False, search_in="name"):
 
             for doc in docs[:limit]:
                 try:
-                    mid = getattr(doc, "material_id", None) or getattr(doc, "mpid", None)
-                    formula = getattr(doc, "formula_pretty", "") or ""
-                    sym = getattr(doc, "symmetry", None)
-                    crystal_raw = sym.crystal_system if sym and hasattr(sym, "crystal_system") else None
-                    crystal = str(crystal_raw) if crystal_raw is not None else None
+                    mid = _mp_doc_get(doc, "material_id") or _mp_doc_get(doc, "mpid")
+                    formula = _mp_doc_get(doc, "formula_pretty", "") or ""
+                    crystal = _mp_doc_crystal_system(doc)
+                    crystal = str(crystal) if crystal is not None else None
                     a = b = c = None
-                    if hasattr(doc, "structure") and doc.structure and hasattr(doc.structure, "lattice"):
-                        a = round(doc.structure.lattice.a, 5)
-                        b = round(doc.structure.lattice.b, 5)
-                        c = round(doc.structure.lattice.c, 5)
-                    elems = getattr(doc, "elements", None)
+                    structure = _mp_doc_structure(doc)
+                    if structure is not None:
+                        a = round(structure.lattice.a, 5)
+                        b = round(structure.lattice.b, 5)
+                        c = round(structure.lattice.c, 5)
+                    elems = _mp_doc_get(doc, "elements")
                     elem_list = []
                     elem_text = ''
                     if elems:
