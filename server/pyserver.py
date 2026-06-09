@@ -601,9 +601,40 @@ def _twin_resolve_alloy_row(qs):
     return rows[comp_i % len(rows)], entry
 
 
+def _twin_material_context(qs):
+    """
+    解析数字孪生物料来源。
+    返回 (alloy_row, fallback_metal, mode_label)
+    - 上传成分表优先
+    - material_mode=metal：显式金属预设（论文 VASP c_ij）
+    - 默认 htem：Si SAM；fallback_metal 仅在 HTEM 不可用时生效
+    """
+    alloy_row, _ent = _twin_resolve_alloy_row(qs)
+    if alloy_row is not None:
+        return alloy_row, None, 'upload'
+
+    mode = str((qs.get('material_mode') or qs.get('mode') or ['htem'])[0]).strip().lower()
+    metal = str((qs.get('metal') or qs.get('element') or [''])[0]).strip()
+
+    if mode == 'metal' and metal:
+        try:
+            from digital_twin.metal_presets import alloy_row_from_preset
+
+            row = alloy_row_from_preset(metal)
+            if row:
+                row = dict(row)
+                row['_source'] = 'metal_preset'
+                return row, None, f'metal:{metal.capitalize()}'
+        except Exception:
+            pass
+
+    fallback = metal or None
+    return None, fallback, 'htem'
+
+
 def twin_properties_for_request(T_K, P_GPa, qs):
     """侧栏标量：上传成分为 alloy_table 时用表中 B/G/E（或由 cij 估算），否则走 SAM/占位。"""
-    row, _ent = _twin_resolve_alloy_row(qs)
+    row, _fallback, mode = _twin_material_context(qs)
     if row is not None:
         c11, c12, c44 = float(row['c11']), float(row['c12']), float(row['c44'])
         B = row.get('B')
@@ -621,6 +652,11 @@ def twin_properties_for_request(T_K, P_GPa, qs):
             E = 9 * B * G / max(3 * B + G, 1e-6)
         else:
             E = float(E)
+        label = row.get('label', '')
+        if mode.startswith('metal:'):
+            model = f'metal_preset:{label}'
+        else:
+            model = f'alloy_table:{label}'
         return {
             'T_K': round(float(T_K), 2),
             'P_GPa': round(float(P_GPa), 3),
@@ -628,7 +664,7 @@ def twin_properties_for_request(T_K, P_GPa, qs):
             'shear_modulus_GPa': round(G, 2),
             'young_modulus_GPa': round(E, 2),
             'volume_scale': 1.0,
-            'model': f"alloy_table:{row.get('label', '')}",
+            'model': model,
         }
     return twin_properties_placeholder(T_K, P_GPa)
 
@@ -791,8 +827,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 if _compute_anisotropy_bundle is None:
                     raise RuntimeError('anisotropy_surface 模块不可用')
-                alloy_row, _ent = _twin_resolve_alloy_row(qs)
-                fallback_metal = (qs.get('metal') or qs.get('element') or [None])[0]
+                alloy_row, fallback_metal, _mode = _twin_material_context(qs)
                 payload = _compute_anisotropy_bundle(
                     T_K,
                     P_GPa,
@@ -800,7 +835,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                     n_theta,
                     n_chi,
                     alloy_row=alloy_row,
-                    fallback_metal=str(fallback_metal) if fallback_metal else None,
+                    fallback_metal=fallback_metal,
                 )
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json; charset=utf-8')

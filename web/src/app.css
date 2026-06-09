@@ -144,6 +144,17 @@ body {
   background: #252830;
 }
 
+.btn.secondary.active {
+  background: #1a4d7a;
+  border-color: #8ab4f8;
+  color: #e8f0fe;
+}
+
+.btn.secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .btn.danger {
   background: #5c2b2b;
   border-color: #f28b82;
@@ -1969,6 +1980,42 @@ body {
   color: #9aa0a6;
   margin: 0 0 14px;
   font-size: 13px;
+}
+
+.dt-mode-badge {
+  text-align: center;
+  font-size: 13px;
+  color: #9aa0a6;
+  margin: -6px 0 10px;
+}
+
+.dt-mode-badge strong {
+  color: #e8eaed;
+  margin: 0 6px;
+}
+
+.dt-mode-bar {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dt-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.dt-pill.ok {
+  background: #1e3a2f;
+  color: #81c995;
+}
+
+.dt-pill.warn {
+  background: #3a2a1e;
+  color: #fdd663;
 }
 
 .dt-layout {

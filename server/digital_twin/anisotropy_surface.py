@@ -283,7 +283,11 @@ def _compute_anisotropy_htem(
             c13=alloy_row.get("c13"),
             c33=alloy_row.get("c33"),
         )
-        model_tag = f"alloy_table:{alloy_row.get('label', '')}"
+        model_tag = (
+            f"metal_preset:{alloy_row.get('label', '')}"
+            if alloy_row.get('_source') == 'metal_preset'
+            else f"alloy_table:{alloy_row.get('label', '')}"
+        )
     else:
         Eobj = build_elasticity_at_tp(T_K, P_GPa)
         model_tag = 'HTEM_SAM'

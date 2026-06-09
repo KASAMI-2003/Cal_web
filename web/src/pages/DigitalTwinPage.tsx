@@ -71,6 +71,57 @@ const DEFAULT_COLOR_CONFIG: Record<string, WindowColorConfig> = {
   'win-vl': { auto: true, min: '', max: '' },
 };
 
+type MaterialMode = 'htem' | 'Cu' | 'Al' | 'Ni' | 'Ti';
+const METAL_PRESETS: MaterialMode[] = ['Cu', 'Al', 'Ni', 'Ti'];
+const TWIN_MATERIAL_MODE_KEY = 'twin_material_mode';
+
+function readMaterialMode(): MaterialMode {
+  const stored = localStorage.getItem(TWIN_MATERIAL_MODE_KEY);
+  if (stored === 'htem' || METAL_PRESETS.includes(stored as MaterialMode)) {
+    return stored as MaterialMode;
+  }
+  const legacy = localStorage.getItem('twin_metal_symbol');
+  if (legacy && METAL_PRESETS.includes(legacy as MaterialMode)) {
+    return legacy as MaterialMode;
+  }
+  return 'htem';
+}
+
+function persistMaterialMode(mode: MaterialMode) {
+  localStorage.setItem(TWIN_MATERIAL_MODE_KEY, mode);
+  localStorage.removeItem('twin_metal_symbol');
+}
+
+function appendMaterialQuery(query: URLSearchParams, mode: MaterialMode) {
+  if (mode === 'htem') {
+    query.set('material_mode', 'htem');
+    return;
+  }
+  query.set('material_mode', 'metal');
+  query.set('metal', mode);
+}
+
+function materialModeLabel(mode: MaterialMode): string {
+  return mode === 'htem' ? 'HTEM Si SAM' : `金属预设 ${mode}`;
+}
+
+function surfaceStatusFromModel(model: string, mode: MaterialMode): string {
+  if (model.startsWith('metal_preset_') || model.startsWith('metal_preset:')) {
+    const sym = model.split(':').pop()?.replace('metal_preset_', '') || mode;
+    return `已加载 ${sym} 论文 VASP 各向异性曲面 (${model})`;
+  }
+  if (model.startsWith('alloy_table:')) {
+    return `已加载上传成分表曲面 (${model})`;
+  }
+  if (model === 'numpy_fallback_si' || model.startsWith('numpy_fallback')) {
+    return '警告：HTEM SAM 不可用，当前为 Si 占位曲面。请确认 server/digital_twin/HTEM-main 存在并重启后端。';
+  }
+  if (model === 'HTEM_SAM' || model.startsWith('HTEM_SAM')) {
+    return `已加载 HTEM Si SAM 各向异性曲面 (${model})`;
+  }
+  return `已加载各向异性曲面 (${model || materialModeLabel(mode)})`;
+}
+
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
@@ -200,6 +251,9 @@ export function DigitalTwinPage() {
   const [surfaceData, setSurfaceData] = useState<any>(null);
   const [surfaceLoading, setSurfaceLoading] = useState(false);
   const [twinCaps, setTwinCaps] = useState<TwinCaps | null>(null);
+  const [materialMode, setMaterialMode] = useState<MaterialMode>(() => readMaterialMode());
+  const [htemReady, setHtemReady] = useState<boolean | null>(null);
+  const [fedorovBusy, setFedorovBusy] = useState(false);
 
   const [windows, setWindows] = useState<VizWindow[]>(DEFAULT_WINDOWS);
   const [windowColor, setWindowColor] = useState<Record<string, WindowColorConfig>>(DEFAULT_COLOR_CONFIG);
@@ -219,6 +273,27 @@ export function DigitalTwinPage() {
   const [scanSpin, setScanSpin] = useState(true);
   const [scanHighRes, setScanHighRes] = useState(false);
   const [scanRunning, setScanRunning] = useState(false);
+
+  const uploadConfigActive = !!activeTwinFileId;
+
+  async function loadHtemStatus() {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_PYTHON_API_ORIGIN || ''}/api/digital_twin/htem_status`);
+      if (!response.ok) {
+        setHtemReady(false);
+        return;
+      }
+      const json = await response.json();
+      setHtemReady(Boolean(json?.htem_available && json?.sam_cache_ready));
+    } catch {
+      setHtemReady(null);
+    }
+  }
+
+  function appendActiveMaterialQuery(query: URLSearchParams, fileId?: string) {
+    if (fileId || activeTwinFileId) return;
+    appendMaterialQuery(query, materialMode);
+  }
 
   const apiUsername = useMemo(() => {
     const fromAuth = (auth.username || '').trim();
@@ -466,7 +541,6 @@ export function DigitalTwinPage() {
       const timeoutId = window.setTimeout(() => controller.abort(), 60000);
       const useFastGrid = scanRunningRef.current && !scanHighRes;
       const grid = useFastGrid ? { n_phi: 22, n_theta: 32, n_chi: 22 } : { n_phi: 48, n_theta: 72, n_chi: 48 };
-      const metal = localStorage.getItem('twin_metal_symbol') || '';
       const query = new URLSearchParams({
         T: String(t),
         P: String(p),
@@ -479,7 +553,7 @@ export function DigitalTwinPage() {
         high_res: useFastGrid ? '0' : '1',
         _ts: String(params?.cacheBust ?? Date.now()),
       });
-      if (metal) query.set('metal', metal);
+      appendActiveMaterialQuery(query, fileId);
       const response = await fetch(`${import.meta.env.VITE_PYTHON_API_ORIGIN || ''}/api/digital_twin/anisotropy_surface?${query.toString()}`, {
         method: 'GET',
         signal: controller.signal,
@@ -500,15 +574,7 @@ export function DigitalTwinPage() {
         setSurfaceData(json);
         if (!params?.silent) {
           const model = String(json?.model ?? '');
-          if (model === 'numpy_fallback_si' || model.startsWith('metal_preset_')) {
-            setStatus(
-              model.startsWith('metal_preset_')
-                ? `已加载各向异性曲面（HTEM 不可用，使用金属预设 ${model.replace('metal_preset_', '')}）`
-                : '警告：未启用 HTEM SAM，当前为占位曲面。请在服务器执行 git pull 并确认 server/digital_twin/HTEM-main 存在后重启 calweb-backend。',
-            );
-          } else {
-            setStatus(`已加载各向异性曲面${model ? ` (${model})` : ''}`);
-          }
+          setStatus(surfaceStatusFromModel(model, materialMode));
         }
       }
       return json;
@@ -560,8 +626,9 @@ export function DigitalTwinPage() {
         twin_file: (opts?.fileId ?? activeTwinFileId) || '',
         comp_index: String(Math.max(0, Math.floor(opts?.compIndex ?? compIndex))),
         _ts: String(opts?.cacheBust ?? Date.now()),
-      }).toString();
-      const response = await pythonApi.twinProperties(query);
+      });
+      appendActiveMaterialQuery(query, opts?.fileId);
+      const response = await pythonApi.twinProperties(query.toString());
       setMetricsFromProps(response as TwinProps, opts?.showDelta === true);
     } catch (error) {
       setMetricsHtml(`<span style="color:#f28b82">标量 API：${(error as Error).message}</span>`);
@@ -617,6 +684,69 @@ export function DigitalTwinPage() {
     }
   }
 
+  async function switchMaterialMode(mode: MaterialMode) {
+    try {
+      stopScanAnimation();
+      setConfigSwitching(true);
+      persistMaterialMode(mode);
+      setMaterialMode(mode);
+      setSurfaceData(null);
+
+      if (mode !== 'htem' && activeTwinFileId) {
+        const clearResp = await pythonApi.twinActivateDat({
+          username: apiUsername,
+          twin_file: undefined,
+        });
+        if (!clearResp.success) {
+          setStatus(`切换材料失败: ${clearResp.message || '无法清除上传配置'}`);
+          return;
+        }
+        setActiveTwinFileId('');
+        setSelectedTwinFile('');
+        setCompIndex(0);
+        await loadCapabilities('');
+      }
+
+      setStatus(`正在切换到 ${materialModeLabel(mode)} …`);
+      const ts = Date.now();
+      await fetchTwinProperties({ fileId: '', compIndex: 0, cacheBust: ts });
+      const latest = await fetchSurface({ fileId: '', compIndex: 0, cacheBust: ts });
+      if (latest) {
+        rerenderVisibleWindows(latest);
+        setStatus(surfaceStatusFromModel(String(latest?.model ?? ''), mode));
+      }
+    } catch (error) {
+      setStatus(`切换材料失败: ${(error as Error).message}`);
+    } finally {
+      setConfigSwitching(false);
+    }
+  }
+
+  async function runFedorovCrosscheck() {
+    const sym = materialMode === 'htem' ? 'Cu' : materialMode;
+    try {
+      setFedorovBusy(true);
+      setStatus(`正在对 ${sym} 做 Fedorov 交叉校验…`);
+      const r = await pythonApi.fedorovCrosscheck(sym);
+      if (!r.success) {
+        setStatus(r.message || '交叉校验失败');
+        return;
+      }
+      const worst = Array.isArray((r as any).worst_samples)
+        ? (r as any).worst_samples
+            .map((s: any) => `${s.offline_GPa} vs ${s.platform_GPa} GPa (${s.rel_pct}%)`)
+            .join('；')
+        : '';
+      setStatus(
+        `${r.message || '交叉校验完成'}${worst ? `\n最大偏差方向：${worst}` : ''}`,
+      );
+    } catch (e) {
+      setStatus(`交叉校验失败: ${(e as Error).message}`);
+    } finally {
+      setFedorovBusy(false);
+    }
+  }
+
   async function activateAndRefresh(fileId: string) {
     try {
       stopScanAnimation();
@@ -657,7 +787,8 @@ export function DigitalTwinPage() {
       setConfigSwitching(true);
       setStatus('正在恢复默认 HTEM 并加载曲面...');
       setSurfaceData(null);
-      localStorage.removeItem('twin_metal_symbol');
+      persistMaterialMode('htem');
+      setMaterialMode('htem');
       const response = await pythonApi.twinActivateDat({
         username: apiUsername,
         twin_file: undefined,
@@ -960,9 +1091,28 @@ export function DigitalTwinPage() {
 
   useEffect(() => {
     const boot = async () => {
-      // 首次进入强制恢复为默认 HTEM，会话不受之前上传文件激活影响
-      await resetToDefaultAndRefresh();
-      await loadCapabilities();
+      const mode = readMaterialMode();
+      persistMaterialMode(mode);
+      setMaterialMode(mode);
+      try {
+        setConfigSwitching(true);
+        await pythonApi.twinActivateDat({ username: apiUsername, twin_file: undefined });
+        setActiveTwinFileId('');
+        setSelectedTwinFile('');
+        setCompIndex(0);
+        await loadCapabilities('');
+        await loadHtemStatus();
+        const ts = Date.now();
+        await fetchTwinProperties({ fileId: '', compIndex: 0, cacheBust: ts });
+        const latest = await fetchSurface({ fileId: '', compIndex: 0, cacheBust: ts });
+        if (latest) {
+          rerenderVisibleWindows(latest);
+        }
+      } catch (error) {
+        setStatus(`初始化失败: ${(error as Error).message}`);
+      } finally {
+        setConfigSwitching(false);
+      }
     };
     void boot();
   }, []);
@@ -983,18 +1133,25 @@ export function DigitalTwinPage() {
       <div className="dt-inner">
         <h2 className="dt-title">弹性各向异性数字孪生（HTEM SAM）</h2>
         <p className="dt-sub">
-          支持<strong>默认 HTEM 单材料</strong>（T、P）与<strong>上传表</strong>（名义成分 + c_ij）。
-          已内置论文金属预设（Cu/Al/Ni/Ti）；可进行 Fedorov 离线交叉校验。
+          支持<strong>默认 HTEM Si SAM</strong>（T、P）、<strong>论文金属预设</strong>（Cu/Al/Ni/Ti 各向异性演示）与<strong>上传表</strong>（名义成分 + c_ij）。
         </p>
-        <div className="row" style={{ marginBottom: 12 }}>
-          {['Cu', 'Al', 'Ni', 'Ti'].map((sym) => (
+        <p className="dt-mode-badge">
+          当前曲面源：
+          <strong>{uploadConfigActive ? `上传表 (${activeTwinFileId})` : materialModeLabel(materialMode)}</strong>
+          {!uploadConfigActive && materialMode === 'htem' && htemReady !== null ? (
+            <span className={htemReady ? 'dt-pill ok' : 'dt-pill warn'}>{htemReady ? 'HTEM 已就绪' : 'HTEM 未就绪（将回退占位）'}</span>
+          ) : null}
+        </p>
+        <div className="row dt-mode-bar" style={{ marginBottom: 12 }}>
+          {METAL_PRESETS.map((sym) => (
             <button
               key={sym}
               type="button"
-              className="btn secondary"
+              className={`btn secondary${materialMode === sym && !uploadConfigActive ? ' active' : ''}`}
+              disabled={configSwitching || surfaceLoading || uploadConfigActive}
+              title={uploadConfigActive ? '已激活上传表，请先恢复默认或切换配置' : `查看 ${sym} 论文 VASP 各向异性曲面`}
               onClick={() => {
-                localStorage.setItem('twin_metal_symbol', sym);
-                setStatus(`已设置金属回退预设 ${sym}（仅 HTEM 不可用时生效；默认仍用 Si SAM）`);
+                void switchMaterialMode(sym);
               }}
             >
               金属 {sym}
@@ -1002,11 +1159,10 @@ export function DigitalTwinPage() {
           ))}
           <button
             type="button"
-            className="btn secondary"
+            className={`btn secondary${materialMode === 'htem' && !uploadConfigActive ? ' active' : ''}`}
+            disabled={configSwitching || surfaceLoading || uploadConfigActive}
             onClick={() => {
-              localStorage.removeItem('twin_metal_symbol');
-              setStatus('已清除金属预设，默认使用 HTEM Si SAM');
-              void fetchSurface({ cacheBust: Date.now() });
+              void switchMaterialMode('htem');
             }}
           >
             默认 Si SAM
@@ -1014,17 +1170,13 @@ export function DigitalTwinPage() {
           <button
             type="button"
             className="btn secondary"
-            onClick={async () => {
-              const sym = localStorage.getItem('twin_metal_symbol') || 'Cu';
-              try {
-                const r = await pythonApi.fedorovCrosscheck(sym);
-                setStatus(r.message || JSON.stringify(r));
-              } catch (e) {
-                setStatus(`交叉校验失败: ${(e as Error).message}`);
-              }
+            disabled={fedorovBusy || configSwitching}
+            title="对比平台曲面与独立 Fedorov 实现的杨氏模量方向值"
+            onClick={() => {
+              void runFedorovCrosscheck();
             }}
           >
-            Fedorov 交叉校验
+            {fedorovBusy ? '校验中…' : 'Fedorov 交叉校验'}
           </button>
         </div>
 
