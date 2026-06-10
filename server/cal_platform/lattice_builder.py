@@ -52,13 +52,7 @@ def resolve_bulk_structure(
         material_name=material_name,
     )
 
-    if re.search(r'\bbcc\b|体心|body[- ]?centered|im[- ]?3m|ia[- ]?3m', hints):
-        return 'bcc'
-    if re.search(r'\bhcp\b|hexagonal|六方|wurtzite|p6[_/ ]?6|p63', hints):
-        return 'hcp'
-    if re.search(r'\bfcc\b|面心|face[- ]?centered|fm[- ]?3m|fd[- ]?3m|c1=f', hints):
-        return 'fcc'
-
+    # 空间群优先于字面量 fcc/bcc（前端 infer 有误时仍可纠正）
     if space_group_no is not None:
         try:
             sg = int(space_group_no)
@@ -70,6 +64,13 @@ def resolve_bulk_structure(
                 return 'hcp'
         except (TypeError, ValueError):
             pass
+
+    if re.search(r'\bbcc\b|体心|body[- ]?centered|im[- ]?3m|ia[- ]?3m', hints):
+        return 'bcc'
+    if re.search(r'\bhcp\b|hexagonal|六方|wurtzite|p6[_/ ]?6|p63', hints):
+        return 'hcp'
+    if re.search(r'\bfcc\b|面心|face[- ]?centered|fm[- ]?3m|fd[- ]?3m|c1=f', hints):
+        return 'fcc'
 
     if any(token in hints for token in ('hexagonal', '六方', 'trigonal', '三角', 'hcp')):
         return 'hcp'
@@ -90,10 +91,6 @@ def resolve_bulk_structure(
         return 'orthogonal'
 
     if 'cubic' in hints or '立方' in hints:
-        if space_group_no in _BCC_SPACE_GROUPS:
-            return 'bcc'
-        if space_group_no in _FCC_SPACE_GROUPS:
-            return 'fcc'
         return 'fcc'
 
     s = (raw or 'fcc').strip().lower()

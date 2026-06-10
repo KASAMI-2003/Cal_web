@@ -1284,7 +1284,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                         sc = None
 
                     lattice_data = build_lattice_mesh(
-                        structure=data.get('lattice_const') or data.get('structure') or 'fcc',
+                        structure=data.get('structure') or data.get('lattice_const') or 'fcc',
                         lattice_a=_lattice_float('lattice_a'),
                         lattice_b=_lattice_float('lattice_b'),
                         lattice_c=_lattice_float('lattice_c'),
@@ -2081,6 +2081,23 @@ def _space_group_no_to_crystal_system(no):
     return None
 
 
+def _space_group_no_to_lattice_type(no):
+    """空间群 → ASE bulk 类型（bcc/fcc/hcp），用于本地库与前端侧栏绘图。"""
+    if no is None:
+        return None
+    try:
+        n = int(no)
+    except (TypeError, ValueError):
+        return None
+    if n in (211, 229):
+        return "bcc"
+    if n in (225, 227):
+        return "fcc"
+    if 168 <= n <= 194:
+        return "hcp"
+    return None
+
+
 def _is_mp_data_source(src):
     """判断 data_source 是否来自 Materials Project（此类不展示数据来源）"""
     if not src or not isinstance(src, str):
@@ -2176,7 +2193,8 @@ def data_in_u_nb_materials(element, selected):
         for row in rows:
             result_map = {"晶体结构": None, "晶格常数": None, "弹性刚度常数C11": None, "弹性刚度常数C12": None, "杨氏模量E-H": None}
             space_group_no = row.get("space_group_no")
-            result_map["晶体结构"] = _space_group_no_to_crystal_system(space_group_no)
+            lattice_type = _space_group_no_to_lattice_type(space_group_no)
+            result_map["晶体结构"] = lattice_type or _space_group_no_to_crystal_system(space_group_no)
             if result_map["晶体结构"] is None and row.get("notes"):
                 notes = (row["notes"] or "").lower()
                 if "im-3m" in notes or "fm-3m" in notes or "spacegroup_symbol" in notes and "cubic" in notes:
@@ -2221,6 +2239,9 @@ def data_in_u_nb_materials(element, selected):
                 "db_formula": row.get("material_name", element),
                 "db_timestamp": ts_str,
                 "data_source": data_src,
+                "space_group_no": space_group_no,
+                "notes": row.get("notes"),
+                "material_name": row.get("material_name", element),
             }
             if result_map["晶格常数"]:
                 lc = result_map["晶格常数"]

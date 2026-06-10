@@ -285,26 +285,49 @@ function parseLatticeAxes(data: Record<string, unknown>): { a: number | null; b:
 }
 
 function inferLatticeType(data: Record<string, unknown>): 'fcc' | 'bcc' | 'hcp' | 'orthogonal' {
-  const structure = String(data.晶体结构 ?? data.structure ?? '');
+  const structure = String(data.晶体结构 ?? data.structure ?? data.crystal_system ?? '');
   const notes = String(data.notes ?? '');
-  const materialName = String(data.material_name ?? data.db_formula ?? '');
-  const spaceGroupNo = parseFloatLike(data.space_group_no);
-  const hints = [structure, notes, materialName, spaceGroupNo != null ? `spacegroup=${spaceGroupNo}` : '']
+  const materialName = String(data.material_name ?? data.db_formula ?? data.化学式 ?? '');
+  const dataSource = String(data.data_source ?? data.source ?? '');
+  const spaceGroupNo = parseFloatLike(data.space_group_no ?? data.spacegroup);
+  const hints = [structure, notes, materialName, dataSource, spaceGroupNo != null ? `spacegroup=${spaceGroupNo}` : '']
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
 
-  if (/\bbcc\b|体心|body[- ]?centered|im[- ]?3m|ia[- ]?3m/.test(hints)) return 'bcc';
-  if (/\bhcp\b|hexagonal|六方|wurtzite|p6/.test(hints)) return 'hcp';
-  if (/\bfcc\b|面心|face[- ]?centered|fm[- ]?3m|fd[- ]?3m/.test(hints)) return 'fcc';
   if (spaceGroupNo === 229 || spaceGroupNo === 211) return 'bcc';
   if (spaceGroupNo === 225 || spaceGroupNo === 227) return 'fcc';
   if (spaceGroupNo != null && spaceGroupNo >= 168 && spaceGroupNo <= 194) return 'hcp';
+
+  if (/\bbcc\b|体心|body[- ]?centered|im[- ]?3m|ia[- ]?3m/.test(hints)) return 'bcc';
+  if (/\bhcp\b|hexagonal|六方|wurtzite|p6/.test(hints)) return 'hcp';
+  if (/\bfcc\b|面心|face[- ]?centered|fm[- ]?3m|fd[- ]?3m/.test(hints)) return 'fcc';
   if (/orthorhombic|tetragonal|monoclinic|triclinic|斜方|四方|单斜|cmcm/.test(hints)) return 'orthogonal';
   if (/hex|六方|hcp/.test(hints)) return 'hcp';
   if (/body|体心/.test(hints)) return 'bcc';
   if (/cubic|立方/.test(hints)) return 'fcc';
   return 'fcc';
+}
+
+function enrichLocalMaterialData(data: Record<string, unknown>): Record<string, unknown> {
+  const enriched: Record<string, unknown> = { ...data };
+  const sg = parseFloatLike(enriched.space_group_no ?? enriched.spacegroup);
+  const existing = String(enriched.晶体结构 ?? enriched.structure ?? '').trim().toLowerCase();
+
+  if (sg === 229 || sg === 211) enriched.晶体结构 = 'bcc';
+  else if (sg === 225 || sg === 227) enriched.晶体结构 = 'fcc';
+  else if (sg != null && sg >= 168 && sg <= 194 && !existing) enriched.晶体结构 = 'hcp';
+  else if (!existing && String(enriched.notes ?? '').toLowerCase().includes('im-3m')) enriched.晶体结构 = 'bcc';
+
+  if (enriched.晶格常数a == null && enriched.a != null) {
+    enriched.晶格常数a = enriched.a;
+    enriched.晶格常数b = enriched.b;
+    enriched.晶格常数c = enriched.c;
+  }
+  if (!enriched.晶格常数 && enriched.a != null && enriched.b != null && enriched.c != null) {
+    enriched.晶格常数 = `a=${Number(enriched.a).toFixed(3)} b=${Number(enriched.b).toFixed(3)} c=${Number(enriched.c).toFixed(3)}`;
+  }
+  return enriched;
 }
 
 function pickPrimaryElement(data: Record<string, unknown>, formulaSymbols: string[]): string {
@@ -616,7 +639,8 @@ function buildMaterialOptionsFromSearch(
   });
 
   (page2Res.materials ?? []).forEach((item, idx) => {
-    const data = item as Record<string, unknown>;
+    const raw = item as Record<string, unknown>;
+    const data = enrichLocalMaterialData(raw);
     const isMp = data.source === 'Materials Project' || String(data.data_source ?? '').includes('Materials Project');
     const id = isMp
       ? String(data.id ?? `material-${idx}`).startsWith('mp-')
@@ -634,14 +658,15 @@ function buildMaterialOptionsFromSearch(
   });
 
   (mysqlRes.db_materials ?? []).forEach((item) => {
-    const id = normalizeLocalMaterialId(item.id as string | number | undefined);
+    const data = enrichLocalMaterialData(item);
+    const id = normalizeLocalMaterialId(data.id as string | number | undefined);
     options.push({
       id,
-      title: String(item.material_name ?? item.db_formula ?? item.id ?? '本地材料'),
+      title: String(data.material_name ?? data.db_formula ?? data.id ?? '本地材料'),
       sourceType: 'local',
       tag: 'db_materials',
       kind: 'materials',
-      data: { ...item, id },
+      data: { ...data, id },
     });
   });
 
@@ -2187,16 +2212,15 @@ export function VisualizationPage() {
     }
 
     try {
-      const structure = String(data.晶体结构 ?? data.structure ?? '');
       const latticeType = inferLatticeType(data);
       const generated = await pythonApi.createLatticePicture({
         lattice_const: latticeType,
-        structure,
+        structure: String(data.晶体结构 ?? data.structure ?? latticeType),
         lattice_a: axes.a ?? undefined,
         lattice_b: axes.b ?? undefined,
         lattice_c: axes.c ?? undefined,
         element: primaryElement,
-        space_group_no: parseFloatLike(data.space_group_no) ?? undefined,
+        space_group_no: parseFloatLike(data.space_group_no ?? data.spacegroup) ?? undefined,
         notes: String(data.notes ?? '') || undefined,
         material_name: String(data.material_name ?? data.db_formula ?? activeMaterial!.title) || undefined,
       });
