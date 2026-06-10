@@ -1,0 +1,172 @@
+-- 论文 U–Nb materials 种子数据（答辩/服务器部署用）
+-- 用法：mysql -u py_server -p123456 u_nb_database < deploy/thesis-materials.sql
+-- 含：纯 U/Nb、COD 等原子合金、Zhang 2020 Vegard 系列、Beeler/Brown/Pan 关键条目
+-- 已剔除 MP/OQMD 冗余结构（原 dump 1–44 行）
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+USE `u_nb_database`;
+
+DROP TABLE IF EXISTS `materials`;
+
+CREATE TABLE `materials` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `material_name` varchar(512) NOT NULL,
+  `u_at_pct` decimal(10,4) NOT NULL,
+  `nb_at_pct` decimal(10,4) NOT NULL,
+  `space_group_no` int DEFAULT NULL,
+  `data_source` text,
+  `a` double NOT NULL,
+  `b` double NOT NULL,
+  `c` double NOT NULL,
+  `alpha` double DEFAULT 90,
+  `beta` double DEFAULT 90,
+  `gamma` double DEFAULT 90,
+  `formation_energy` double DEFAULT NULL,
+  `data_type` enum('experimental','calculated') NOT NULL,
+  `notes` text,
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_material_name` (`material_name`(191)),
+  KEY `idx_u_nb` (`u_at_pct`, `nb_at_pct`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `materials` (
+  `material_name`, `u_at_pct`, `nb_at_pct`, `space_group_no`, `data_source`,
+  `a`, `b`, `c`, `alpha`, `beta`, `gamma`, `formation_energy`, `data_type`, `notes`
+) VALUES
+-- 纯元素（论文 U–Nb 相图基础）
+('U (alpha, Cmcm)', 100.00, 0.00, 63,
+ 'COD 1527120 (Barrett 1963, Phys. Rev.)',
+ 2.8444, 5.8689, 4.9316, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Cmcm (No.63); low-T alpha-U'),
+('U (gamma, Im-3m)', 100.00, 0.00, 229,
+ 'COD 9008556 (Wyckoff 1963)',
+ 3.474, 3.474, 3.474, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Im-3m (No.229); high-T gamma-U'),
+('Nb (bcc, Im-3m)', 0.00, 100.00, 229,
+ 'COD 9008546 (Wyckoff, Crystal Structures, 1963)',
+ 3.3004, 3.3004, 3.3004, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Im-3m (No.229)'),
+
+-- 等原子 NbU bcc（论文 γ 相重点，补全 space_group_no=229）
+('NbU (equiatomic, bcc Im-3m)', 50.00, 50.00, 229,
+ 'COD 1522787 (Rogers et al., Trans. AIME 212, 1958)',
+ 3.398, 3.398, 3.398, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Im-3m (No.229); COD ID 1522787'),
+('NbU (equiatomic, bcc Im-3m)', 50.00, 50.00, 229,
+ 'COD 1537843 (Dwight, Alloying behavior of columbium, 1961)',
+ 3.404, 3.404, 3.404, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Im-3m (No.229); COD ID 1537843'),
+
+-- Beeler 2013 实验/计算对照
+('U (alpha, Cmcm) - Beeler Barrett expt (50 K)', 100.00, 0.00, 63,
+ 'Beeler et al., J. Nucl. Mater. 433 (2013) Table 2',
+ 2.836, 5.867, 4.936, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Cmcm (No.63)'),
+('U (gamma, bcc Im-3m) - Wilson expt (298 K)', 100.00, 0.00, 229,
+ 'Beeler et al., J. Nucl. Mater. 433 (2013) Table 8',
+ 3.47, 3.47, 3.47, 90, 90, 90, NULL, 'experimental',
+ 'spacegroup_symbol=Im-3m (No.229)'),
+('U (alpha, Cmcm) - Beeler PBE', 100.00, 0.00, 63,
+ 'Beeler et al., J. Nucl. Mater. 433 (2013) Table 2 (PBE)',
+ 2.793, 5.849, 4.894, 90, 90, 90, NULL, 'calculated',
+ 'spacegroup_symbol=Cmcm (No.63)'),
+('U (gamma, bcc Im-3m) - Beeler PBE', 100.00, 0.00, 229,
+ 'Beeler et al., J. Nucl. Mater. 433 (2013) Table 8 (PBE)',
+ 3.427, 3.427, 3.427, 90, 90, 90, NULL, 'calculated',
+ 'spacegroup_symbol=Im-3m (No.229)'),
+
+-- 低 Nb 单斜 / LANL 原位中子
+('U-12.5at.%Nb (monoclinic)', 87.50, 12.50, NULL,
+ 'First-principles study on thermodynamic defect properties of U-Nb',
+ 5.958, 5.699, 4.885, 90, 90, 96.3, NULL, 'calculated',
+ 'Monoclinic; alpha=beta=90 deg, gamma=96.3 deg'),
+('U-6wt.%Nb (~14.1 at.% Nb), alpha-prime monoclinic - LANL', 85.95, 14.05, NULL,
+ 'Brown et al., 6 wt% niobium in-situ neutron diffraction (LA-UR)',
+ 2.914, 5.718, 4.965, 90, 90, 93.26, NULL, 'experimental',
+ 'alpha-prime lattice at 6.25 wt% Nb'),
+('U-6.5wt.%Nb (~15.2 at.% Nb), gamma0 tetragonal - LANL', 84.88, 15.12, NULL,
+ 'Brown et al., 6 wt% niobium in-situ neutron diffraction (LA-UR)',
+ 4.935, 4.935, 3.365, 90, 90, 90, NULL, 'experimental',
+ 'gamma0 (tetragonally distorted bcc)'),
+
+-- Pan 2023 有序金属间化合物
+('U2Nb (P6_3/mmc, 0 GPa) - Pan 2023', 66.67, 33.33, 194,
+ 'Pan et al., J. Nucl. Mater. 579 (2023) 154394; arXiv:2303.14442 Table S1',
+ 4.807, 4.807, 5.906, 90, 90, 120, NULL, 'calculated',
+ 'spacegroup_symbol=P6_3/mmc (No.194); ordered intermetallic at 0 GPa'),
+('U3Nb (Pmm2, 0 GPa) - Pan 2023', 75.00, 25.00, 25,
+ 'Pan et al., J. Nucl. Mater. 579 (2023) 154394; arXiv:2303.14442 Table S1',
+ 2.873, 4.979, 5.6, 90, 90, 90, NULL, 'calculated',
+ 'spacegroup_symbol=Pmm2 (No.25)'),
+
+-- Zhang 2020 Vegard 系列（论文 γ 相 bcc Im-3m，space_group_no=229）
+('U-0at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 100.00, 0.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493; a(x)=3.4757-0.176*x',
+ 3.4757, 3.4757, 3.4757, 90, 90, 90, NULL, 'calculated',
+ 'Vegard-type @23C; gamma phase may be metastable at RT'),
+('U-5at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 95.00, 5.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4669, 3.4669, 3.4669, 90, 90, 90, NULL, 'calculated', NULL),
+('U-10at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 90.00, 10.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4581, 3.4581, 3.4581, 90, 90, 90, NULL, 'calculated', NULL),
+('U-15at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 85.00, 15.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4493, 3.4493, 3.4493, 90, 90, 90, NULL, 'calculated', NULL),
+('U-20at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 80.00, 20.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4405, 3.4405, 3.4405, 90, 90, 90, NULL, 'calculated', NULL),
+('U-25at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 75.00, 25.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4317, 3.4317, 3.4317, 90, 90, 90, NULL, 'calculated', NULL),
+('U-30at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 70.00, 30.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4229, 3.4229, 3.4229, 90, 90, 90, NULL, 'calculated', NULL),
+('U-35at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 65.00, 35.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4141, 3.4141, 3.4141, 90, 90, 90, NULL, 'calculated', NULL),
+('U-40at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 60.00, 40.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.4053, 3.4053, 3.4053, 90, 90, 90, NULL, 'calculated', NULL),
+('U-45at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 55.00, 45.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3965, 3.3965, 3.3965, 90, 90, 90, NULL, 'calculated', NULL),
+('U-50at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 50.00, 50.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3877, 3.3877, 3.3877, 90, 90, 90, NULL, 'calculated', NULL),
+('U-55at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 45.00, 55.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3789, 3.3789, 3.3789, 90, 90, 90, NULL, 'calculated', NULL),
+('U-60at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 40.00, 60.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3701, 3.3701, 3.3701, 90, 90, 90, NULL, 'calculated', NULL),
+('U-65at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 35.00, 65.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3613, 3.3613, 3.3613, 90, 90, 90, NULL, 'calculated', NULL),
+('U-70at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 30.00, 70.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3525, 3.3525, 3.3525, 90, 90, 90, NULL, 'calculated', NULL),
+('U-75at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 25.00, 75.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3437, 3.3437, 3.3437, 90, 90, 90, NULL, 'calculated', NULL),
+('U-80at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 20.00, 80.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3349, 3.3349, 3.3349, 90, 90, 90, NULL, 'calculated', NULL),
+('U-85at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 15.00, 85.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3261, 3.3261, 3.3261, 90, 90, 90, NULL, 'calculated', NULL),
+('U-90at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 10.00, 90.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3173, 3.3173, 3.3173, 90, 90, 90, NULL, 'calculated', NULL),
+('U-95at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 5.00, 95.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.3085, 3.3085, 3.3085, 90, 90, 90, NULL, 'calculated', NULL),
+('U-100at.%Nb (gamma, bcc Im-3m) @23C (Vegard-Zhang2020)', 0.00, 100.00, 229,
+ 'Zhang et al., J. Nucl. Mater. 542 (2020) 152493',
+ 3.2997, 3.2997, 3.2997, 90, 90, 90, NULL, 'calculated', NULL);
+
+SET FOREIGN_KEY_CHECKS = 1;
