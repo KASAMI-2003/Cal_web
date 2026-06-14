@@ -8,6 +8,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
+    // frp 外网访问（如 http://sj.frp.one:51737 → 本机 5173）
+    allowedHosts: ['xy-2.frp.one', 'localhost', '127.0.0.1'],
     proxy: {
       '/api/ssh/ws': {
         target: `ws://127.0.0.1:${terminalWsPort}`,

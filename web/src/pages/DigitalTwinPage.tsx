@@ -4,6 +4,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { pythonApi } from '../api/pythonApi';
 import { getAuthState } from '../auth/authStore';
 
+const TWIN_UPLOAD_ACCEPT = '.dat,.txt,.csv,.xlsx,.xls';
+const TWIN_UPLOAD_EXT_RE = /\.(dat|txt|csv|xlsx|xlsm|xls)$/i;
+
+function isTwinUploadFile(file: File): boolean {
+  return TWIN_UPLOAD_EXT_RE.test(file.name);
+}
+
 type VizKind = 'E' | 'nu_max' | 'vl';
 type ScanMode = 'off' | 'sweep-T' | 'sweep-P' | 'sweep-comp';
 
@@ -817,7 +824,11 @@ export function DigitalTwinPage() {
 
   async function handleUploadDat() {
     if (!uploadFile) {
-      setUploadStatus('请选择 .dat 文件');
+      setUploadStatus('请选择 .dat / .xlsx 等数据文件');
+      return;
+    }
+    if (!isTwinUploadFile(uploadFile)) {
+      setUploadStatus('仅支持 .dat、.txt、.csv、.xlsx 格式');
       return;
     }
     try {
@@ -841,7 +852,11 @@ export function DigitalTwinPage() {
 
   async function handleUploadAndActivate(file: File) {
     if (!apiUsername) {
-      setStatus('请先登录后上传 .dat 文件');
+      setStatus('请先登录后上传数据文件');
+      return;
+    }
+    if (!isTwinUploadFile(file)) {
+      setUploadStatus('仅支持 .dat、.txt、.csv、.xlsx 格式');
       return;
     }
     setUploadFile(file);
@@ -1300,9 +1315,9 @@ export function DigitalTwinPage() {
             {twinCaps?.note ? <p className="status">{twinCaps.note}</p> : null}
 
             <div className="dt-file-panel">
-              <h3>输入数据（.dat）</h3>
+              <h3>输入数据（.dat / .xlsx）</h3>
               <p className="status" style={{ marginTop: 0 }}>
-                登录后可拖入 .dat 或选择已保存文件。成分表激活离散成分轴；HTEM 温压表激活后会切换 SAM 输入。
+                登录后可拖入 .dat、.xlsx 或选择已保存文件。成分表激活离散成分轴；HTEM 温压表激活后会切换 SAM 输入。
               </p>
               <div
                 className="dt-drop-zone"
@@ -1318,12 +1333,12 @@ export function DigitalTwinPage() {
                   }
                 }}
               >
-                拖放 .dat 到此处，或点击选择文件
+                拖放 .dat / .xlsx 到此处，或点击选择文件
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".dat,.txt"
+                accept={TWIN_UPLOAD_ACCEPT}
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -1372,7 +1387,7 @@ export function DigitalTwinPage() {
               </div>
               <p className="status">当前生效配置：{activeTwinFileId || '默认 HTEM（服务器配置）'}{configSwitching ? '（加载中）' : ''}</p>
               <div className="row">
-                <input type="file" accept=".dat,.txt" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
+                <input type="file" accept={TWIN_UPLOAD_ACCEPT} onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
                 <button className="btn" onClick={handleUploadDat} disabled={!uploadFile}>上传</button>
               </div>
               <p className="status">{uploadStatus}</p>

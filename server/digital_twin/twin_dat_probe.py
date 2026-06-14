@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-探测 .dat 输入：HTEM 温压网格表 vs 名义成分 + 弹性常数表（alloy_elastic 类）。
+探测 .dat / .xlsx 等输入：HTEM 温压网格表 vs 名义成分 + 弹性常数表（alloy_elastic 类）。
 用于数字孪生前端决定 T / P / 成分 三轴是否可用。
 """
 from __future__ import annotations
 
 import io
+import os
 import re
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+_EXCEL_EXTS = {".xlsx", ".xlsm", ".xls"}
 
 
 def _norm_name(s: str) -> str:
@@ -27,9 +30,88 @@ def _find_col(df: pd.DataFrame, *candidates: str) -> str | None:
     return None
 
 
+def _is_excel_path(path: str) -> bool:
+    return os.path.splitext(path or "")[1].lower() in _EXCEL_EXTS
+
+
+def _is_excel_filename(filename: str) -> bool:
+    return os.path.splitext(filename or "")[1].lower() in _EXCEL_EXTS
+
+
+def _read_excel(source) -> pd.DataFrame:
+    """读取 Excel；若首行不像表头则跳过首行（兼容 HTEM 首行说明）。"""
+    df0 = pd.read_excel(source, engine="openpyxl", header=0)
+    cols_join = " ".join(str(c) for c in df0.columns)
+    if "T(K)" not in cols_join and _norm_name("T(K)") not in _norm_name(cols_join):
+        if _find_col(df0, "Alloy", "alloy", "Composition", "composition", "成分") and _find_col(
+            df0, "c11", "C11"
+        ):
+            return df0
+        if hasattr(source, "seek"):
+            source.seek(0)
+        df1 = pd.read_excel(source, engine="openpyxl", header=1)
+        return df1
+    return df0
+
+
 def _read_htem_table(path_or_buf) -> pd.DataFrame:
     """HTEM example 格式：首行说明，次行表头，空白分隔。"""
     return pd.read_csv(path_or_buf, sep=r"\s+", engine="python", header=0, skiprows=[0])
+
+
+def _read_text_table_buf(buf: io.BytesIO) -> pd.DataFrame:
+    buf.seek(0)
+    try:
+        df = pd.read_csv(buf, sep="\t", engine="python")
+        if df.shape[1] < 4:
+            buf.seek(0)
+            df = pd.read_csv(buf, sep=r"\s+", engine="python")
+    except Exception:
+        buf.seek(0)
+        df = pd.read_csv(buf, sep=r"\s+", engine="python")
+    return df
+
+
+def read_table_from_bytes(raw: bytes, filename: str = "") -> pd.DataFrame:
+    if _is_excel_filename(filename):
+        return _read_excel(io.BytesIO(raw))
+    head = raw[:4096].decode("utf-8", errors="ignore")
+    if "T(K)" in head and "P(GPa)" in head and ("C11" in head or "c11" in head.lower()):
+        return _read_htem_table(io.BytesIO(raw))
+    return _read_text_table_buf(io.BytesIO(raw))
+
+
+def read_table_from_path(path: str) -> pd.DataFrame:
+    if _is_excel_path(path):
+        return _read_excel(path)
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        head = f.read(4096)
+    if "T(K)" in head and "P(GPa)" in head and ("C11" in head or "c11" in head.lower()):
+        return _read_htem_table(path)
+    try:
+        df = pd.read_csv(path, sep="\t", engine="python")
+        if df.shape[1] < 4:
+            df = pd.read_csv(path, sep=r"\s+", engine="python")
+    except Exception:
+        df = pd.read_csv(path, sep=r"\s+", engine="python")
+    return df
+
+
+def _probe_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+    """先识别 HTEM 温压网格，再识别成分 + c_ij 表。"""
+    tcol = _find_col(df, "T(K)", "t(k)", "T")
+    pcol = _find_col(df, "P(GPa)", "p(gpa)", "P")
+    c11_htem = _find_col(df, "C11(GPa)", "c11", "C11")
+    if tcol and pcol and c11_htem:
+        result = probe_htem_style(df)
+        if result.get("kind") != "unknown":
+            return result
+
+    alloy_col = _find_col(df, "Alloy", "alloy", "Composition", "composition", "成分")
+    if alloy_col and _find_col(df, "c11", "C11"):
+        return probe_alloy_table(df)
+
+    return {"kind": "unknown", "error": "无法识别：既不是 HTEM 温压网格也不是 Alloy+c11/c12/c44 表"}
 
 
 def probe_htem_style(df: pd.DataFrame) -> dict[str, Any]:
@@ -94,7 +176,7 @@ def probe_htem_style(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def probe_alloy_table(df: pd.DataFrame) -> dict[str, Any]:
-    alloy_col = _find_col(df, "Alloy", "alloy", "Composition", "composition")
+    alloy_col = _find_col(df, "Alloy", "alloy", "Composition", "composition", "成分")
     c11c = _find_col(df, "c11", "C11")
     c12c = _find_col(df, "c12", "C12")
     c44c = _find_col(df, "c44", "C44")
@@ -176,50 +258,26 @@ def probe_alloy_table(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def probe_dat_path(path: str) -> dict[str, Any]:
-    with open(path, encoding="utf-8", errors="ignore") as f:
-        head = f.read(4096)
-    if "T(K)" in head and "P(GPa)" in head and ("C11" in head or "c11" in head.lower()):
-        try:
-            df = _read_htem_table(path)
-            return probe_htem_style(df)
-        except Exception as e:
-            return {"kind": "unknown", "error": f"解析 HTEM 表失败: {e}"}
     try:
-        df = pd.read_csv(path, sep="\t", engine="python")
-        if df.shape[1] < 4:
-            df = pd.read_csv(path, sep=r"\s+", engine="python")
+        df = read_table_from_path(path)
+        return _probe_dataframe(df)
     except Exception as e:
         return {"kind": "unknown", "error": f"读取表格失败: {e}"}
-    if _find_col(df, "Alloy", "alloy") and _find_col(df, "c11", "C11"):
-        return probe_alloy_table(df)
-    return {"kind": "unknown", "error": "无法识别：既不是 HTEM 温压网格也不是 Alloy+c11/c12/c44 表"}
 
 
 def probe_dat_bytes(raw: bytes, filename: str = "") -> dict[str, Any]:
-    buf = io.BytesIO(raw)
-    head = raw[:4096].decode("utf-8", errors="ignore")
-    if "T(K)" in head and "P(GPa)" in head:
-        try:
-            df = pd.read_csv(buf, sep=r"\s+", engine="python", header=0, skiprows=[0])
-            return probe_htem_style(df)
-        except Exception as e:
-            return {"kind": "unknown", "error": f"解析 HTEM 表失败: {e}"}
-    buf.seek(0)
     try:
-        df = pd.read_csv(buf, sep="\t", engine="python")
-        if df.shape[1] < 4:
-            buf.seek(0)
-            df = pd.read_csv(buf, sep=r"\s+", engine="python")
+        df = read_table_from_bytes(raw, filename)
+        return _probe_dataframe(df)
+    except ImportError as e:
+        return {"kind": "unknown", "error": f"缺少 Excel 依赖 openpyxl，请 pip install openpyxl: {e}"}
     except Exception as e:
         return {"kind": "unknown", "error": f"读取表格失败: {e}"}
-    if _find_col(df, "Alloy", "alloy") and _find_col(df, "c11", "C11"):
-        return probe_alloy_table(df)
-    return {"kind": "unknown", "error": "无法识别文件格式"}
 
 
 def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """返回每行 {label,c11,c12,c44,rho?, B?, G?, E?, nu?} 与 probe 元数据。"""
-    df = pd.read_csv(path, sep="\t", engine="python")
+    df = read_table_from_path(path)
     df = df.dropna(how="all")
     meta = probe_alloy_table(df)
     if meta.get("kind") != "alloy_table":
@@ -248,3 +306,42 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 rowd[key] = float(r[cc])
         rows.append(rowd)
     return rows, meta
+
+
+def export_htem_dat(src_path: str, dest_dat: str) -> str:
+    """
+    将 Excel/文本表格导出为 HTEM 可读的空格分隔 .dat（首行说明 + 表头 + 数据）。
+    供上传 xlsx 且 kind=htem_grid 时供 SAM 使用。
+    """
+    df = read_table_from_path(src_path)
+    meta = probe_htem_style(df)
+    if meta.get("kind") != "htem_grid":
+        raise ValueError(meta.get("error", "不是 HTEM 温压网格"))
+
+    cols = meta["columns"]
+    use_cols = [cols[k] for k in ("T", "P", "C11", "C12", "C44", "rho") if cols.get(k)]
+    out_df = df[use_cols].dropna(how="all").copy()
+    for c in use_cols:
+        out_df[c] = pd.to_numeric(out_df[c], errors="coerce")
+    out_df = out_df.dropna(subset=[cols["T"], cols["P"], cols["C11"]])
+
+    os.makedirs(os.path.dirname(dest_dat) or ".", exist_ok=True)
+    with open(dest_dat, "w", encoding="utf-8", newline="\n") as f:
+        f.write("Exported from user upload (xlsx/csv)\n")
+        header = "  ".join(str(c) for c in use_cols)
+        f.write(header + "\n")
+        for _, row in out_df.iterrows():
+            f.write("  ".join(f"{float(row[c]):.6g}" for c in use_cols) + "\n")
+    return dest_dat
+
+
+def resolve_htem_dat_path(path: str) -> str:
+    """HTEM SAM 仅接受 .dat；Excel 上传时按需导出旁路 .dat。"""
+    if not path or not os.path.isfile(path):
+        return path
+    if not _is_excel_path(path):
+        return path
+    dest = os.path.splitext(path)[0] + "._htem_export.dat"
+    if not os.path.isfile(dest) or os.path.getmtime(dest) < os.path.getmtime(path):
+        export_htem_dat(path, dest)
+    return dest

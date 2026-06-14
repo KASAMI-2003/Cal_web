@@ -12,7 +12,7 @@ import secrets
 import time
 from typing import Any
 
-from twin_dat_probe import load_alloy_rows, probe_dat_bytes
+from twin_dat_probe import load_alloy_rows, probe_dat_bytes, resolve_htem_dat_path
 
 SERVER_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 REGISTRY_PATH = os.path.join(SERVER_ROOT, "digital_twin_user_registry.json")
@@ -99,6 +99,18 @@ def _load_registry() -> dict[str, Any]:
     return data
 
 
+def _upload_disk_basename(original_filename: str) -> str:
+    base = _safe_segment(os.path.basename(original_filename) or "upload.dat")
+    ext = os.path.splitext(original_filename or "")[1].lower()
+    allowed = {".dat", ".txt", ".csv", ".xlsx", ".xlsm", ".xls"}
+    if ext in allowed:
+        root, _ = os.path.splitext(base)
+        return root + ext
+    if not base.lower().endswith(".dat"):
+        return base + ".dat"
+    return base
+
+
 def register_user_dat(username: str, raw: bytes, original_filename: str) -> dict[str, Any]:
     if not username or not username.strip():
         raise ValueError("需要用户名")
@@ -109,9 +121,7 @@ def register_user_dat(username: str, raw: bytes, original_filename: str) -> dict
     file_id = secrets.token_urlsafe(16)
     user_dir = os.path.join(UPLOAD_ROOT, _safe_segment(username.strip()))
     os.makedirs(user_dir, exist_ok=True)
-    base = _safe_segment(os.path.basename(original_filename) or "upload.dat")
-    if not base.lower().endswith(".dat"):
-        base += ".dat"
+    base = _upload_disk_basename(original_filename)
     disk_name = f"{file_id[:10]}_{int(time.time())}_{base}"
     disk_path = os.path.join(user_dir, disk_name)
     with open(disk_path, "wb") as f:
@@ -267,6 +277,6 @@ def apply_htem_session_for_entry(entry: dict[str, Any] | None) -> None:
     if entry and entry.get("kind") == "htem_grid":
         path = resolve_disk_path_for_entry(entry)
         if path and os.path.isfile(path):
-            set_session_elasticity_dat(path)
+            set_session_elasticity_dat(resolve_htem_dat_path(path))
             return
     set_session_elasticity_dat(None)
