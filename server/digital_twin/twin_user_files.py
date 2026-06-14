@@ -219,10 +219,17 @@ def capabilities_for_file(entry: dict[str, Any] | None, default_sam_caps: dict[s
         },
     }
     if kind == "alloy_table":
-        cap["note"] = (
-            "成分为表中离散名义成分；未在表中出现的 T/P 维度显示为未检测到。"
-            " 各向异性曲面由 c11、c12、c44（及默认或表内 rho）计算。"
-        )
+        fmt = (entry.get("probe") or {}).get("columns", {}).get("format", "cij")
+        if fmt == "moduli_hill":
+            cap["note"] = (
+                "成分为 wt%（+ phases）离散点；侧栏 B/G/E 取自表中 Hill/Voigt 列。"
+                " 各向异性曲面由 B、G 反推立方 c_ij 渲染（无 c11/c12/c44 时）。"
+            )
+        else:
+            cap["note"] = (
+                "成分为表中离散名义成分；未在表中出现的 T/P 维度显示为未检测到。"
+                " 各向异性曲面由 c11、c12、c44（及默认或表内 rho）计算。"
+            )
     elif kind == "htem_grid":
         cap["note"] = (
             "已切换 HTEM 温压网格输入（全站进程级生效至下次切换）。"

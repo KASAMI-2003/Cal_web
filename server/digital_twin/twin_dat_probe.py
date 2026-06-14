@@ -38,20 +38,29 @@ def _is_excel_filename(filename: str) -> bool:
     return os.path.splitext(filename or "")[1].lower() in _EXCEL_EXTS
 
 
+def _looks_like_data_header(df: pd.DataFrame) -> bool:
+    """判断首行是否已是有效表头（避免 Excel 误 skip 一行）。"""
+    if _find_col(df, "T(K)", "t(k)"):
+        return True
+    if _find_col(df, "Alloy", "alloy", "Composition", "composition", "成分") and _find_col(
+        df, "c11", "C11"
+    ):
+        return True
+    if _find_col(df, "wt%", "wt", "wt.%") and (
+        _find_col(df, "BH", "BV", "BR", "GH", "GV", "GR", "EH", "Ev", "ER")
+    ):
+        return True
+    return False
+
+
 def _read_excel(source) -> pd.DataFrame:
     """读取 Excel；若首行不像表头则跳过首行（兼容 HTEM 首行说明）。"""
     df0 = pd.read_excel(source, engine="openpyxl", header=0)
-    cols_join = " ".join(str(c) for c in df0.columns)
-    if "T(K)" not in cols_join and _norm_name("T(K)") not in _norm_name(cols_join):
-        if _find_col(df0, "Alloy", "alloy", "Composition", "composition", "成分") and _find_col(
-            df0, "c11", "C11"
-        ):
-            return df0
-        if hasattr(source, "seek"):
-            source.seek(0)
-        df1 = pd.read_excel(source, engine="openpyxl", header=1)
-        return df1
-    return df0
+    if _looks_like_data_header(df0):
+        return df0
+    if hasattr(source, "seek"):
+        source.seek(0)
+    return pd.read_excel(source, engine="openpyxl", header=1)
 
 
 def _read_htem_table(path_or_buf) -> pd.DataFrame:
@@ -97,8 +106,54 @@ def read_table_from_path(path: str) -> pd.DataFrame:
     return df
 
 
+def _cubic_cij_from_bulk_shear(B: float, G: float) -> tuple[float, float, float]:
+    """由 Hill/Voigt 体模量 B、剪切模量 G 反推立方 c11/c12/c44（各向同性极限映射，供曲面渲染）。"""
+    B, G = float(B), float(G)
+    c12 = B - 2.0 * G / 3.0
+    c11 = c12 + 2.0 * G
+    c44 = G
+    return c11, c12, c44
+
+
+def _cubic_cij_from_E_nu(E: float, nu: float) -> tuple[float, float, float]:
+    E, nu = float(E), float(nu)
+    G = E / (2.0 * (1.0 + nu))
+    B = E / (3.0 * (1.0 - 2.0 * nu))
+    return _cubic_cij_from_bulk_shear(B, G)
+
+
+def _first_numeric(row, col: str | None) -> float | None:
+    if not col or col not in row.index:
+        return None
+    val = pd.to_numeric(row[col], errors="coerce")
+    if pd.isna(val):
+        return None
+    return float(val)
+
+
+def _composition_label(row, wt_col: str, phases_col: str | None) -> str:
+    wt_raw = row[wt_col]
+    if pd.isna(wt_raw):
+        wt = ""
+    else:
+        wt = str(wt_raw).strip()
+        if wt.endswith(".0") and wt.replace(".0", "").isdigit():
+            wt = wt[:-2]
+        if wt and not wt.endswith("%") and _norm_name(wt_col) in ("wt%", "wt.%"):
+            try:
+                float(wt)
+                wt = f"{wt}%"
+            except ValueError:
+                pass
+    if phases_col and phases_col in row.index and pd.notna(row.get(phases_col)):
+        ph = str(row[phases_col]).strip()
+        if ph and ph.lower() != "nan":
+            return f"{wt} · {ph}" if wt else ph
+    return wt or "row"
+
+
 def _probe_dataframe(df: pd.DataFrame) -> dict[str, Any]:
-    """先识别 HTEM 温压网格，再识别成分 + c_ij 表。"""
+    """先识别 HTEM 温压网格，再识别 c_ij 成分表，再识别 wt%+模量表。"""
     tcol = _find_col(df, "T(K)", "t(k)", "T")
     pcol = _find_col(df, "P(GPa)", "p(gpa)", "P")
     c11_htem = _find_col(df, "C11(GPa)", "c11", "C11")
@@ -107,11 +162,11 @@ def _probe_dataframe(df: pd.DataFrame) -> dict[str, Any]:
         if result.get("kind") != "unknown":
             return result
 
-    alloy_col = _find_col(df, "Alloy", "alloy", "Composition", "composition", "成分")
-    if alloy_col and _find_col(df, "c11", "C11"):
-        return probe_alloy_table(df)
+    result = probe_alloy_table(df)
+    if result.get("kind") != "unknown":
+        return result
 
-    return {"kind": "unknown", "error": "无法识别：既不是 HTEM 温压网格也不是 Alloy+c11/c12/c44 表"}
+    return probe_moduli_table(df)
 
 
 def probe_htem_style(df: pd.DataFrame) -> dict[str, Any]:
@@ -253,6 +308,60 @@ def probe_alloy_table(df: pd.DataFrame) -> dict[str, Any]:
             "T": tcol,
             "P": pcol,
             "rho": rhoc,
+            "format": "cij",
+        },
+    }
+
+
+def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
+    """
+    HTEM / 高通量输出的 wt% + phases + B/G/E/nu（Hill/Voigt/Reuss）成分表。
+    无 c11/c12/c44 时由 B、G（或 E、ν）反推立方 c_ij 供各向异性曲面。
+    """
+    wt_col = _find_col(df, "wt%", "wt", "wt.%", "weight", "wtpercent")
+    if not wt_col:
+        return {"kind": "unknown", "error": "模量成分表需含 wt%（或 wt）列"}
+
+    b_col = _find_col(df, "BH", "BV", "BR", "B")
+    g_col = _find_col(df, "GH", "GV", "GR", "G")
+    e_col = _find_col(df, "EH", "Ev", "ER", "E")
+    nu_col = _find_col(df, "nu_H", "nu_V", "nu_R", "nu", "ν")
+    phases_col = _find_col(df, "phases", "phase", "相")
+
+    if not b_col and not g_col and not (e_col and nu_col):
+        return {
+            "kind": "unknown",
+            "error": "模量成分表需含 BH/GH（或 BV/GV、EH/nu_H 等）模量列",
+        }
+
+    df2 = df.dropna(how="all").copy()
+    n_rows = len(df2)
+    if n_rows < 1:
+        return {"kind": "unknown", "error": "无有效数据行"}
+
+    labels = [_composition_label(r, wt_col, phases_col) for _, r in df2.iterrows()]
+
+    return {
+        "kind": "alloy_table",
+        "has_T": False,
+        "has_P": False,
+        "has_composition": n_rows > 0,
+        "T": {"detected": False, "note": "未检测到 T（wt% 模量表为固定成分点）"},
+        "P": {"detected": False, "note": "未检测到 P（wt% 模量表为固定成分点）"},
+        "composition": {
+            "detected": True,
+            "n": n_rows,
+            "labels": labels,
+            "field": wt_col,
+        },
+        "columns": {
+            "alloy": wt_col,
+            "phases": phases_col,
+            "B": b_col,
+            "G": g_col,
+            "E": e_col,
+            "nu": nu_col,
+            "format": "moduli_hill",
         },
     }
 
@@ -279,16 +388,58 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """返回每行 {label,c11,c12,c44,rho?, B?, G?, E?, nu?} 与 probe 元数据。"""
     df = read_table_from_path(path)
     df = df.dropna(how="all")
+
     meta = probe_alloy_table(df)
+    if meta.get("kind") == "unknown":
+        meta = probe_moduli_table(df)
     if meta.get("kind") != "alloy_table":
         raise ValueError(meta.get("error", "不是 alloy_table"))
+
     c = meta["columns"]
-    rows = []
+    fmt = c.get("format") or "cij"
+    rows: list[dict[str, Any]] = []
+
     for _, r in df.iterrows():
+        if fmt == "moduli_hill":
+            label = _composition_label(r, c["alloy"], c.get("phases"))
+            B = _first_numeric(r, c.get("B"))
+            G = _first_numeric(r, c.get("G"))
+            E = _first_numeric(r, c.get("E"))
+            nu = _first_numeric(r, c.get("nu"))
+
+            if B is not None and G is not None:
+                c11, c12, c44 = _cubic_cij_from_bulk_shear(B, G)
+            elif E is not None and nu is not None:
+                c11, c12, c44 = _cubic_cij_from_E_nu(E, nu)
+                if B is None:
+                    B = E / (3.0 * (1.0 - 2.0 * nu))
+                if G is None:
+                    G = E / (2.0 * (1.0 + nu))
+            else:
+                continue
+
+            rowd: dict[str, Any] = {
+                "label": label,
+                "c11": c11,
+                "c12": c12,
+                "c44": c44,
+                "rho": 6.5,
+            }
+            if B is not None:
+                rowd["B"] = B
+            if G is not None:
+                rowd["G"] = G
+            if E is not None:
+                rowd["E"] = E
+            if nu is not None:
+                rowd["nu"] = nu
+            rows.append(rowd)
+            continue
+
         rho = 6.5
         if c.get("rho") and c["rho"] in df.columns and pd.notna(r.get(c["rho"])):
             rho = float(r[c["rho"]])
-        rowd: dict[str, Any] = {
+        rowd = {
             "label": str(r[c["alloy"]]).strip(),
             "c11": float(r[c["c11"]]),
             "c12": float(r[c["c12"]]),
@@ -296,15 +447,18 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "rho": rho,
         }
         for key, names in (
-            ("B", ("B",)),
-            ("G", ("G",)),
-            ("E", ("E",)),
-            ("nu", ("ν", "nu")),
+            ("B", ("B", "BH", "BV", "BR")),
+            ("G", ("G", "GH", "GV", "GR")),
+            ("E", ("E", "EH", "Ev", "ER")),
+            ("nu", ("ν", "nu", "nu_H", "nu_V", "nu_R")),
         ):
             cc = _find_col(df, *names)
             if cc and cc in df.columns and pd.notna(r.get(cc)):
                 rowd[key] = float(r[cc])
         rows.append(rowd)
+
+    if not rows:
+        raise ValueError("模量成分表无有效数据行（需 BH+GH 或 EH+nu_H 等）")
     return rows, meta
 
 

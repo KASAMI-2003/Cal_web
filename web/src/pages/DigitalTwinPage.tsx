@@ -1317,7 +1317,7 @@ export function DigitalTwinPage() {
             <div className="dt-file-panel">
               <h3>输入数据（.dat / .xlsx）</h3>
               <p className="status" style={{ marginTop: 0 }}>
-                登录后可拖入 .dat、.xlsx 或选择已保存文件。成分表激活离散成分轴；HTEM 温压表激活后会切换 SAM 输入。
+                登录后可拖入 .dat、.xlsx 或选择已保存文件。支持 HTEM 温压表、Alloy+c11 表，以及 <strong>wt% + phases + BH/GH/EH</strong> 模量成分表。
               </p>
               <div
                 className="dt-drop-zone"
