@@ -338,8 +338,7 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
       探测 → load_alloy_rows → crystal_systems.enrich_alloy_row_from_moduli
       → anisotropy_surface.build_elasticity_state_from_row → E / nu_max / v_l 曲面
 
-    注意：仅含 BH/GH 的立方行反推 c_ij 在数学上接近各向同性（E 曲面近球形）；
-    六方行或表中直接给出 c_ij 时可呈现真实各向异性。
+    注意：仅 BH/GH 反推 → 各向同性球面；表中含 BV/BR/GV/GR 时会拟合真实 c_ij 以呈现各向异性。
     """
     wt_col = _find_col(df, "wt%", "wt", "wt.%", "weight", "wtpercent")
     if not wt_col:
@@ -350,6 +349,10 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
     e_col = _find_col(df, "EH", "Ev", "ER", "E")
     nu_col = _find_col(df, "nu_H", "nu_V", "nu_R", "nu", "ν")
     phases_col = _find_col(df, "phases", "phase", "相")
+    bv_col = _find_col(df, "BV")
+    br_col = _find_col(df, "BR")
+    gv_col = _find_col(df, "GV")
+    gr_col = _find_col(df, "GR")
 
     if not b_col and not g_col and not (e_col and nu_col):
         return {
@@ -394,6 +397,10 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
             "G": g_col,
             "E": e_col,
             "nu": nu_col,
+            "BV": bv_col,
+            "BR": br_col,
+            "GV": gv_col,
+            "GR": gr_col,
             "format": "moduli_hill",
         },
         "crystal_systems": {
@@ -472,6 +479,17 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 base["E"] = E
             if nu is not None:
                 base["nu"] = nu
+            for vr_key, vr_col in (("BV", c.get("BV")), ("BR", c.get("BR")), ("GV", c.get("GV")), ("GR", c.get("GR"))):
+                if vr_col:
+                    v = _first_numeric(r, vr_col)
+                    if v is not None:
+                        base[vr_key] = v
+            for extra_key, names in (("AVR", ("AVR",)), ("Au", ("Au", "AU"))):
+                ec = _find_col(df, *names)
+                if ec:
+                    v = _first_numeric(r, ec)
+                    if v is not None:
+                        base[extra_key] = v
             if not ((B is not None and G is not None) or (E is not None and nu is not None)):
                 continue
             rowd = enrich_alloy_row_from_moduli(

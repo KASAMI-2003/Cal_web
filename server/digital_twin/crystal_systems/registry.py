@@ -18,6 +18,7 @@ import numpy as np
 
 from .base import CrystalSystemHandler
 from .cubic import CubicHandler
+from .cubic_moduli import hill_moduli_cubic
 from .fedorov import fedorov_S_from_C
 from .hexagonal import HexagonalHandler
 from ._stub import (
@@ -223,6 +224,10 @@ def enrich_alloy_row_from_moduli(
         float(G) if G is not None else None,
         E=float(E) if E is not None else None,
         nu=float(nu) if nu is not None else None,
+        bv=row.get('BV'),
+        br=row.get('BR'),
+        gv=row.get('GV'),
+        gr=row.get('GR'),
     )
     out = dict(row)
     out.update(cij)
@@ -231,6 +236,14 @@ def enrich_alloy_row_from_moduli(
     out['structure'] = infer_structure(phases) or row.get('structure')
     out['cij_source'] = 'moduli_hill'
     out['crystal_display_zh'] = handler.spec.display_zh
+    if system == 'cubic':
+        try:
+            meta_m = hill_moduli_cubic(out['c11'], out['c12'], out['c44'])
+            out['zener_A'] = meta_m['zener_A']
+            if row.get('AVR') is None:
+                out['AVR'] = meta_m['AVR']
+        except ValueError:
+            pass
     return out
 
 
