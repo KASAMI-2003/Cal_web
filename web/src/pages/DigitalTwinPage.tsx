@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { pythonApi } from '../api/pythonApi';
 import { getAuthState } from '../auth/authStore';
+import { DigitalTwinHelpPanel } from './DigitalTwinHelpPanel';
 
 const TWIN_UPLOAD_ACCEPT = '.dat,.txt,.csv,.xlsx,.xls';
 const TWIN_UPLOAD_EXT_RE = /\.(dat|txt|csv|xlsx|xlsm|xls)$/i;
@@ -1171,7 +1172,8 @@ export function DigitalTwinPage() {
       <div className="dt-inner">
         <h2 className="dt-title">弹性各向异性数字孪生（HTEM SAM）</h2>
         <p className="dt-sub">
-          支持<strong>默认 HTEM Si SAM</strong>（T、P）、<strong>论文金属预设</strong>（Cu/Al/Ni/Ti 各向异性演示）与<strong>上传表</strong>（名义成分 + c_ij）。
+          支持<strong>默认 HTEM Si SAM</strong>、<strong>金属预设</strong>（Cu/Al/Ni/Ti）与<strong>上传表</strong>。
+          下方可展开「使用说明」「文件格式」「支持晶系」。
         </p>
         <p className="dt-mode-badge">
           当前曲面源：
@@ -1217,6 +1219,8 @@ export function DigitalTwinPage() {
             {fedorovBusy ? '校验中…' : 'Fedorov 交叉校验'}
           </button>
         </div>
+
+        <DigitalTwinHelpPanel />
 
         <div className="dt-layout">
           <aside className="dt-panel">
