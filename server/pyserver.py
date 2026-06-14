@@ -674,6 +674,9 @@ def twin_properties_for_request(T_K, P_GPa, qs):
             'structure': row.get('structure'),
             'phases': row.get('phases'),
             'cij_source': row.get('cij_source'),
+            'cij_method': row.get('cij_method'),
+            'zener_A': row.get('zener_A'),
+            'phases': row.get('phases'),
         }
     return twin_properties_placeholder(T_K, P_GPa)
 

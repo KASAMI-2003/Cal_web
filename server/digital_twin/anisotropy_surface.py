@@ -37,7 +37,7 @@ except ImportError:
 
 def _elasticity_meta(state: ElasticityState) -> dict:
     """写入 JSON 响应的晶系与 c_ij 来源字段（前端侧栏/状态栏展示）。"""
-    return {
+    meta = {
         'crystal_system': state.crystal_system,
         'htem_lc': state.htem_lc,
         'crystal_display_zh': state.crystal_display_zh,
@@ -45,6 +45,16 @@ def _elasticity_meta(state: ElasticityState) -> dict:
         'cij_source': state.cij_source,
         'rho': round(state.rho, 4),
     }
+    if state.cij:
+        try:
+            if state.crystal_system == 'cubic' and len(state.cij) >= 3:
+                from crystal_systems.cubic_moduli import hill_moduli_cubic
+
+                m = hill_moduli_cubic(state.cij['c11'], state.cij['c12'], state.cij['c44'])
+                meta['zener_A'] = round(m['zener_A'], 4)
+        except Exception:
+            pass
+    return meta
 
 
 def _bundle_from_elasticity_state(
@@ -301,7 +311,13 @@ def _compute_anisotropy_numpy_fallback(
         model_tag = f"alloy_table:{alloy_row.get('label', '')}"
     elif _extra:
         model_tag = _extra
-    return _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
+    payload = _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
+    if alloy_row:
+        if alloy_row.get('cij_method'):
+            payload['cij_method'] = alloy_row['cij_method']
+        if alloy_row.get('zener_A') is not None:
+            payload['zener_A'] = alloy_row['zener_A']
+    return payload
 
 
 def _compute_anisotropy_htem(
@@ -319,7 +335,12 @@ def _compute_anisotropy_htem(
             if alloy_row.get('_source') == 'metal_preset'
             else f"alloy_table:{alloy_row.get('label', '')}"
         )
-        return _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
+        payload = _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
+        if alloy_row.get('cij_method'):
+            payload['cij_method'] = alloy_row['cij_method']
+        if alloy_row.get('zener_A') is not None:
+            payload['zener_A'] = alloy_row['zener_A']
+        return payload
 
     Eobj = build_elasticity_at_tp(T_K, P_GPa)
     model_tag = 'HTEM_SAM'

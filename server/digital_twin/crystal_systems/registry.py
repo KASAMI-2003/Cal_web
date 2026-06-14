@@ -229,8 +229,10 @@ def enrich_alloy_row_from_moduli(
         gv=row.get('GV'),
         gr=row.get('GR'),
     )
+    cij_method = cij.pop('cij_method', 'moduli_hill')
     out = dict(row)
     out.update(cij)
+    out['cij_method'] = cij_method
     out['crystal_system'] = system
     out['htem_lc'] = handler.spec.htem_lc
     out['structure'] = infer_structure(phases) or row.get('structure')

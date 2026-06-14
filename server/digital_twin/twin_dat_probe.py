@@ -338,7 +338,8 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
       探测 → load_alloy_rows → crystal_systems.enrich_alloy_row_from_moduli
       → anisotropy_surface.build_elasticity_state_from_row → E / nu_max / v_l 曲面
 
-    注意：仅 BH/GH 反推 → 各向同性球面；表中含 BV/BR/GV/GR 时会拟合真实 c_ij 以呈现各向异性。
+    注意：含 BV/BR/GV/GR 时做严格四式拟合；不自洽则上传/加载报错，不近似回退。
+    仅 BH/GH 且无 VR 四列时，按各向同性立方处理（曲面为球）。
     """
     wt_col = _find_col(df, "wt%", "wt", "wt.%", "weight", "wtpercent")
     if not wt_col:
@@ -479,7 +480,8 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 base["E"] = E
             if nu is not None:
                 base["nu"] = nu
-            for vr_key, vr_col in (("BV", c.get("BV")), ("BR", c.get("BR")), ("GV", c.get("GV")), ("GR", c.get("GR"))):
+            for vr_key in ("BV", "BR", "GV", "GR"):
+                vr_col = _find_col(df, vr_key) or c.get(vr_key)
                 if vr_col:
                     v = _first_numeric(r, vr_col)
                     if v is not None:
@@ -492,11 +494,20 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                         base[extra_key] = v
             if not ((B is not None and G is not None) or (E is not None and nu is not None)):
                 continue
-            rowd = enrich_alloy_row_from_moduli(
-                base,
-                phases=phases,
-                crystal_system=explicit_cs,
-            )
+            try:
+                rowd = enrich_alloy_row_from_moduli(
+                    base,
+                    phases=phases,
+                    crystal_system=explicit_cs,
+                )
+            except Exception as exc:
+                try:
+                    from .crystal_systems.cubic_moduli import CijFitError
+                except ImportError:
+                    from crystal_systems.cubic_moduli import CijFitError
+                if isinstance(exc, CijFitError):
+                    raise ValueError(f'成分「{label}」: {exc}') from exc
+                raise
             rows.append(rowd)
             continue
 

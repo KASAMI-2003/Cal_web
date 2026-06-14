@@ -67,6 +67,8 @@ interface TwinProps {
   phases?: string;
   /** c_ij 来源：moduli_hill | table_cij */
   cij_source?: string;
+  zener_A?: number;
+  cij_method?: string;
 }
 
 interface TwinSavedFile {
@@ -629,6 +631,7 @@ export function DigitalTwinPage() {
       <div><strong>E</strong> ${Number(props.young_modulus_GPa ?? NaN).toFixed(3)} GPa${showDelta && prev ? formatDelta(prev.young_modulus_GPa, props.young_modulus_GPa, 3) : ''}</div>
       <div><strong>V/V0</strong> ${Number(props.volume_scale ?? NaN).toFixed(5)}${showDelta && prev ? formatDelta(prev.volume_scale, props.volume_scale, 5) : ''}</div>
       ${props.crystal_display_zh || props.crystal_system ? `<div><strong>晶系</strong> ${String(props.crystal_display_zh ?? props.crystal_system ?? '')}${props.structure ? ` (${props.structure})` : ''}${props.phases ? ` · ${props.phases}` : ''}</div>` : ''}
+      ${props.zener_A != null && Number(props.zener_A) > 0 ? `<div><strong>Zener A</strong> ${Number(props.zener_A).toFixed(3)}${props.cij_method ? ` <span style="color:#9aa0a6">(${props.cij_method})</span>` : ''}</div>` : ''}
       <div><strong>model</strong> <code>${String(props.model ?? '')}</code></div>
     `;
     setMetricsHtml(html);

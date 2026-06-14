@@ -18,7 +18,17 @@ SERVER_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__fi
 REGISTRY_PATH = os.path.join(SERVER_ROOT, "digital_twin_user_registry.json")
 UPLOAD_ROOT = os.path.join(SERVER_ROOT, "user_twin_uploads")
 
-_alloy_rows_cache: dict[str, list[dict[str, Any]]] = {}
+_alloy_rows_cache: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
+"""file_id → (mtime, loader_rev, rows)；loader_rev 变更时强制重载。"""
+
+_ALLOY_LOADER_REV = "4"
+
+
+def clear_alloy_cache(file_id: str | None = None) -> None:
+    if file_id:
+        _alloy_rows_cache.pop(file_id, None)
+    else:
+        _alloy_rows_cache.clear()
 
 
 def _safe_segment(s: str) -> str:
@@ -141,11 +151,13 @@ def register_user_dat(username: str, raw: bytes, original_filename: str) -> dict
     _save_registry(reg)
 
     if probe["kind"] == "alloy_table":
+        clear_alloy_cache(file_id)
         try:
             rows, _ = load_alloy_rows(disk_path)
-            _alloy_rows_cache[file_id] = rows
+            mtime = os.path.getmtime(disk_path)
+            _alloy_rows_cache[file_id] = (mtime, _ALLOY_LOADER_REV, rows)
         except Exception:
-            _alloy_rows_cache.pop(file_id, None)
+            clear_alloy_cache(file_id)
     return entry
 
 
@@ -177,13 +189,18 @@ def get_entry(file_id: str, username: str | None) -> dict[str, Any] | None:
 
 
 def ensure_alloy_cache(file_id: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
-    if file_id in _alloy_rows_cache:
-        return _alloy_rows_cache[file_id]
     path = resolve_disk_path_for_entry(entry)
     if not path:
         return []
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0.0
+    cached = _alloy_rows_cache.get(file_id)
+    if cached and cached[0] == mtime and cached[1] == _ALLOY_LOADER_REV:
+        return cached[2]
     rows, _ = load_alloy_rows(path)
-    _alloy_rows_cache[file_id] = rows
+    _alloy_rows_cache[file_id] = (mtime, _ALLOY_LOADER_REV, rows)
     return rows
 
 
@@ -223,8 +240,8 @@ def capabilities_for_file(entry: dict[str, Any] | None, default_sam_caps: dict[s
         if fmt == "moduli_hill":
             cap["note"] = (
                 "成分为 wt%（+ phases）离散点；侧栏 B/G/E 取自 Hill 列。"
-                " 各向异性按 HTEM Fedorov 公式，按 phases 推断晶系（fcc/bcc→立方，hcp→六方）"
-                " 并由 B/G 反推 c_ij。"
+                " 含 BV/BR/GV/GR 时严格反推单晶 c_ij 画曲面，不自洽将报错；"
+                " 仅 BH/GH 时为各向同性球面。"
             )
             crystal_info = (entry.get("probe") or {}).get("crystal_systems") or {}
             if crystal_info.get("inferred"):

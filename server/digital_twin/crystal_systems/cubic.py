@@ -15,8 +15,8 @@ class CubicHandler(CrystalSystemHandler):
     立方晶系：3 个独立常数 c11, c12, c44。
 
     反推 c_ij 优先级：
-      1. 表含 BV+BR+GV+GR → 拟合 HTEM Voigt/Reuss 界（可得到非球形各向异性曲面）
-      2. 仅 BH+GH → 各向同性映射（Zener A=1，E/ν/v_l 为球 — 见 cubic_moduli.isotropic_cij_from_bg）
+      1. 表含 BV+BR+GV+GR → 四式等权拟合（失败则 CijFitError，不做近似回退）
+      2. 仅 BH+GH（无 VR 四列）→ 各向同性映射（Zener A=1，物理上仅适用于 Voigt/Reuss 重合）
     """
     spec = CrystalSystemSpec(
         id='cubic',
@@ -67,7 +67,14 @@ class CubicHandler(CrystalSystemHandler):
         gr = kwargs.get('gr') if kwargs.get('gr') is not None else kwargs.get('GR')
 
         if bv is not None and br is not None and gv is not None and gr is not None:
-            return cij_from_voigt_reuss(float(bv), float(br), float(gv), float(gr))
+            return cij_from_voigt_reuss(
+                float(bv),
+                float(br),
+                float(gv),
+                float(gr),
+                bh=float(B) if B is not None else None,
+                gh=float(G) if G is not None else None,
+            )
 
         if B is not None and G is not None:
             B, G = float(B), float(G)
