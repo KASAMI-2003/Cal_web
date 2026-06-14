@@ -21,7 +21,7 @@ UPLOAD_ROOT = os.path.join(SERVER_ROOT, "user_twin_uploads")
 _alloy_rows_cache: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
 """file_id → (mtime, loader_rev, rows)；loader_rev 变更时强制重载。"""
 
-_ALLOY_LOADER_REV = "4"
+_ALLOY_LOADER_REV = "6"
 
 
 def clear_alloy_cache(file_id: str | None = None) -> None:

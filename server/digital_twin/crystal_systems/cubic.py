@@ -89,12 +89,10 @@ class CubicHandler(CrystalSystemHandler):
 
     def phase_match_score(self, phases: str | None) -> float:
         if not phases:
-            return 0.35
+            return 0.0
         if self._PHASE_RE.search(phases):
             return 1.0
         p = phases.lower()
         if 'hcp' in p or 'hex' in p or '六方' in p:
             return 0.0
-        if '+' in p or 'mix' in p or '双相' in p:
-            return 0.85
-        return 0.2
+        return 0.0

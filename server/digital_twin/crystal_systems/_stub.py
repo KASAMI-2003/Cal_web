@@ -39,5 +39,8 @@ def _stub_handler(
 TetragonalHandler = _stub_handler('tetragonal', 'TI', '四方 I', 'Tetragonal I', ('c11', 'c12', 'c13', 'c33', 'c44', 'c66'))
 OrthorhombicHandler = _stub_handler('orthorhombic', 'O', '正交', 'Orthorhombic', ('c11', 'c12', 'c13', 'c22', 'c23', 'c33', 'c44', 'c55', 'c66'))
 TrigonalHandler = _stub_handler('trigonal', 'RI', '三方 I', 'Rhombohedral I', ('c11', 'c12', 'c13', 'c14', 'c33', 'c44'))
-MonoclinicHandler = _stub_handler('monoclinic', 'M', '单斜', 'Monoclinic', ())
+MonoclinicHandler = _stub_handler('monoclinic', 'M', '单斜', 'Monoclinic', (
+    'c11', 'c12', 'c13', 'c16', 'c22', 'c23', 'c26',
+    'c33', 'c36', 'c44', 'c45', 'c55', 'c66',
+))
 TriclinicHandler = _stub_handler('triclinic', 'N', '三斜', 'Triclinic', ())

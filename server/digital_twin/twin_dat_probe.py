@@ -10,7 +10,8 @@
 
 模量表列优先级（与 HTEM 输出习惯一致）：
   B/G/E/nu 优先 Hill 列（BH、GH、EH、nu_H），其次 Voigt/Reuss（BV/GV、BR/GR…）
-  晶系：phases 含 fcc/bcc→立方，hcp→六方；也可显式 crystal_system / LC 列
+  晶系：alpha_pp→单斜；phases 含 fcc/bcc→立方；hcp→六方；未识别→多晶有效。
+  也可显式 crystal_system / LC 列（monoclinic / M / 单斜 …）
 """
 from __future__ import annotations
 
@@ -338,8 +339,8 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
       探测 → load_alloy_rows → crystal_systems.enrich_alloy_row_from_moduli
       → anisotropy_surface.build_elasticity_state_from_row → E / nu_max / v_l 曲面
 
-    注意：含 BV/BR/GV/GR 时做严格四式拟合；不自洽则上传/加载报错，不近似回退。
-    仅 BH/GH 且无 VR 四列时，按各向同性立方处理（曲面为球）。
+    注意：仅当晶系为 cubic 且 phases 含 fcc/bcc 时，才对 BV/BR/GV/GR 做单晶四式拟合。
+    多晶有效（isotropic）或未识别相名时仅用 BH/GH（曲面为球）；表内 AVR/Au 仍可在侧栏展示。
     """
     wt_col = _find_col(df, "wt%", "wt", "wt.%", "weight", "wtpercent")
     if not wt_col:
@@ -407,7 +408,7 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
         "crystal_systems": {
             "inferred": inferred_systems,
             "from_phases": bool(phases_col),
-            "note": "各成分点按 phases/晶系列推断 HTEM 对称性；fcc/bcc→立方，hcp→六方。",
+            "note": "各成分点按 phases/晶系列推断；alpha_pp→单斜，fcc/bcc→立方，hcp→六方。",
         },
     }
 

@@ -21,8 +21,9 @@ from .cubic import CubicHandler
 from .cubic_moduli import hill_moduli_cubic
 from .fedorov import fedorov_S_from_C
 from .hexagonal import HexagonalHandler
+from .isotropic import IsotropicHandler
+from .monoclinic import MonoclinicHandler
 from ._stub import (
-    MonoclinicHandler,
     OrthorhombicHandler,
     TetragonalHandler,
     TriclinicHandler,
@@ -31,6 +32,7 @@ from ._stub import (
 
 _HANDLERS: tuple[CrystalSystemHandler, ...] = (
     CubicHandler(),
+    IsotropicHandler(),
     HexagonalHandler(),
     TetragonalHandler(),
     OrthorhombicHandler(),
@@ -40,7 +42,10 @@ _HANDLERS: tuple[CrystalSystemHandler, ...] = (
 )  # 新增晶系：在此追加 Handler 实例
 
 _BY_ID: dict[str, CrystalSystemHandler] = {h.spec.id: h for h in _HANDLERS}
-_BY_HTEM: dict[str, CrystalSystemHandler] = {h.spec.htem_lc: h for h in _HANDLERS}
+# isotropic 与 cubic 共用 HTEM LC='C'，lookup 时保留单晶立方 handler
+_BY_HTEM: dict[str, CrystalSystemHandler] = {
+    h.spec.htem_lc: h for h in _HANDLERS if h.spec.id != 'isotropic'
+}
 
 _ALIASES: dict[str, str] = {
     'c': 'cubic',
@@ -71,6 +76,14 @@ _ALIASES: dict[str, str] = {
     'n': 'triclinic',
     'triclinic': 'triclinic',
     '三斜': 'triclinic',
+    'isotropic': 'isotropic',
+    'iso': 'isotropic',
+    'polycrystal': 'isotropic',
+    'polycrystalline': 'isotropic',
+    'effective': 'isotropic',
+    '各向同性': 'isotropic',
+    '多晶': 'isotropic',
+    '多晶有效': 'isotropic',
 }
 
 
@@ -122,17 +135,18 @@ def infer_crystal_system(
     explicit: str | None = None,
 ) -> str:
     """
-    推断晶系 id。优先级：显式列/参数 > phases 关键词匹配 > 默认 cubic。
+    推断晶系 id。优先级：显式 crystal_system/LC 列 > phases 关键词 > 默认 isotropic。
 
     phases 规则示例：
-      fcc / bcc / 立方 / fcc+bcc → cubic
+      fcc / bcc / 立方 → cubic（可用 BV/BR/GV/GR 反推单晶 c_ij）
       hcp / hex / 六方 → hexagonal
+      alpha_pp → monoclinic；fcc/bcc → cubic；hcp → hexagonal；未识别 → isotropic
     """
     norm = normalize_crystal_system(explicit)
     if norm:
         return norm
 
-    best_id = 'cubic'
+    best_id = 'isotropic'
     best_score = 0.0
     for handler in _HANDLERS:
         score = handler.phase_match_score(phases)
@@ -140,12 +154,8 @@ def infer_crystal_system(
             best_score = score
             best_id = handler.spec.id
 
-    if best_score <= 0.0 and phases:
-        p = phases.lower()
-        if 'hcp' in p or 'hex' in p:
-            return 'hexagonal'
-        if '+' in p or 'mix' in p or '双相' in p:
-            return 'cubic'
+    if best_score <= 0.0:
+        return 'isotropic'
 
     return best_id
 
@@ -228,6 +238,8 @@ def enrich_alloy_row_from_moduli(
         br=row.get('BR'),
         gv=row.get('GV'),
         gr=row.get('GR'),
+        avr=row.get('AVR'),
+        au=row.get('Au'),
     )
     cij_method = cij.pop('cij_method', 'moduli_hill')
     out = dict(row)
@@ -238,14 +250,16 @@ def enrich_alloy_row_from_moduli(
     out['structure'] = infer_structure(phases) or row.get('structure')
     out['cij_source'] = 'moduli_hill'
     out['crystal_display_zh'] = handler.spec.display_zh
-    if system == 'cubic':
+    if system in ('cubic', 'isotropic'):
         try:
             meta_m = hill_moduli_cubic(out['c11'], out['c12'], out['c44'])
             out['zener_A'] = meta_m['zener_A']
-            if row.get('AVR') is None:
+            if row.get('AVR') is None and system == 'cubic':
                 out['AVR'] = meta_m['AVR']
         except ValueError:
             pass
+        if system == 'isotropic':
+            out['zener_A'] = 1.0
     return out
 
 
