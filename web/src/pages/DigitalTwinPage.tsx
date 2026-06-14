@@ -638,7 +638,7 @@ export function DigitalTwinPage() {
     metricsPrevRef.current = props;
   }
 
-  async function fetchTwinProperties(opts?: { showDelta?: boolean; fileId?: string; compIndex?: number; cacheBust?: number }) {
+  async function fetchTwinProperties(opts?: { showDelta?: boolean; fileId?: string; compIndex?: number; cacheBust?: number }): Promise<boolean> {
     try {
       setComputeStage('metrics');
       const query = new URLSearchParams({
@@ -652,8 +652,10 @@ export function DigitalTwinPage() {
       appendActiveMaterialQuery(query, opts?.fileId);
       const response = await pythonApi.twinProperties(query.toString());
       setMetricsFromProps(response as TwinProps, opts?.showDelta === true);
+      return true;
     } catch (error) {
       setMetricsHtml(`<span style="color:#f28b82">标量 API：${(error as Error).message}</span>`);
+      return false;
     } finally {
       setComputeStage('idle');
     }
@@ -1085,14 +1087,20 @@ export function DigitalTwinPage() {
       void (async () => {
         setIsComputing(true);
         setStatus('正在计算显示参数…');
-        await fetchTwinProperties();
+        const propsOk = await fetchTwinProperties();
         setComputeStage('surface');
         setStatus('正在计算并更新曲面图像…');
-        const latest = await fetchSurface();
+        const latest = await fetchSurface({ silent: !propsOk });
         if (latest) rerenderVisibleWindows(latest, { preserveView: true });
         setComputeStage('idle');
         setIsComputing(false);
-        setStatus('参数与曲面已同步更新');
+        if (propsOk && latest) {
+          setStatus('参数与曲面已同步更新');
+        } else if (!propsOk) {
+          setStatus('侧栏标量加载失败（见侧栏错误）；曲面已尝试刷新');
+        } else {
+          setStatus('曲面加载失败，请查看上方错误信息');
+        }
       })();
     }, 280);
     return () => {

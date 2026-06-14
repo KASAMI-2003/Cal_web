@@ -676,7 +676,6 @@ def twin_properties_for_request(T_K, P_GPa, qs):
             'cij_source': row.get('cij_source'),
             'cij_method': row.get('cij_method'),
             'zener_A': row.get('zener_A'),
-            'phases': row.get('phases'),
         }
     return twin_properties_placeholder(T_K, P_GPa)
 
@@ -792,7 +791,6 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({'success': True, 'data': apps}).encode('utf-8'))
         elif path == '/api/digital_twin/properties':
-            # 查询参数 T、t、P、p 均可；缺省 300K、0GPa。返回 JSON 驱动前端物性与体积标度。
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             try:
@@ -800,11 +798,24 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 P_GPa = float((qs.get('P') or qs.get('p') or ['0'])[0])
             except (TypeError, ValueError):
                 T_K, P_GPa = 300.0, 0.0
-            payload = twin_properties_for_request(T_K, P_GPa, qs)
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+            try:
+                payload = twin_properties_for_request(T_K, P_GPa, qs)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+            except ValueError as e:
+                logging.warning('digital_twin properties: %s', e)
+                self.send_response(422)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                logging.exception('digital_twin properties: %s', e)
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif path == '/api/digital_twin/htem_status':
             try:
                 from htem_sam_bridge import get_htem_status
