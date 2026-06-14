@@ -1,6 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-HTEM 各向异性三维曲面数据（与 anisotropy.py 中 E、nu_max、v_l 定义一致），供 WebGL 使用。
+HTEM 各向异性三维曲面数据，供 WebGL（Three.js）绘制。
+
+物理量定义与 HTEM-main/source/anisotropy.py 一致：
+  - E(θ,φ)：Young 模量方向图（Fedorov 柔度 + 方向向量 dv）
+  - nu_max(θ,φ)：最大 Poisson 比（对 χ 取 max）
+  - v_l(θ,φ)：纵波声速（Christoffel 方程最大特征值）
+
+数据来源分支：
+  1. 无上传文件 → HTEM SAM 插值 Si 温压网格（build_elasticity_at_tp）
+  2. 上传成分表 → crystal_systems.build_elasticity_state_from_row(alloy_row)
+     （按晶系构造 C 矩阵，再走同一套 Fedorov/Christoffel numpy 实现）
+
+API 入口：compute_anisotropy_bundle → pyserver /api/digital_twin/anisotropy_surface
 """
 from __future__ import annotations
 
@@ -16,6 +28,50 @@ if _BRIDGE_DIR not in sys.path:
     sys.path.insert(0, _BRIDGE_DIR)
 
 from htem_sam_bridge import _ensure_htem_path, build_elasticity_at_tp, htem_available
+
+try:
+    from crystal_systems import ElasticityState, build_elasticity_state_from_row
+except ImportError:
+    from digital_twin.crystal_systems import ElasticityState, build_elasticity_state_from_row
+
+
+def _elasticity_meta(state: ElasticityState) -> dict:
+    """写入 JSON 响应的晶系与 c_ij 来源字段（前端侧栏/状态栏展示）。"""
+    return {
+        'crystal_system': state.crystal_system,
+        'htem_lc': state.htem_lc,
+        'crystal_display_zh': state.crystal_display_zh,
+        'structure': state.structure,
+        'cij_source': state.cij_source,
+        'rho': round(state.rho, 4),
+    }
+
+
+def _bundle_from_elasticity_state(
+    state: ElasticityState,
+    n_phi: int,
+    n_theta: int,
+    n_chi: int,
+    model_tag: str,
+) -> dict:
+    """由 ElasticityState 生成 E / nu_max / v_l 三套球面网格 + 晶系元数据。"""
+    S_fedorov = state.S_matrix_Fedorov
+    phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
+    phi_n, theta_n, M_n = _poisson_nu_max_surface_numpy(S_fedorov, n_phi, n_theta, n_chi)
+    phi_v, theta_v, M_v = _sound_vl_surface(state.C_matrix, state.rho, n_phi, n_theta)
+    payload = {
+        'T_K': round(state.T, 2),
+        'P_GPa': round(state.P, 3),
+        'n_phi': n_phi,
+        'n_theta': n_theta,
+        'n_chi': n_chi,
+        'model': model_tag,
+        'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
+        'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
+        'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),
+    }
+    payload.update(_elasticity_meta(state))
+    return payload
 
 
 def _fedorov_dv(vector: np.ndarray) -> np.ndarray:
@@ -128,26 +184,23 @@ def _metal_cij_fallback(symbol: str, T_K: float, P_GPa: float):
     return c11, c12, c44, rho, 'cubic', None, None, 'numpy_fallback_si'
 
 
-def _build_elasticity_numpy(alloy_row: dict | None, T_K: float, P_GPa: float) -> _NumpyElasticity:
+def _build_elasticity_numpy(alloy_row: dict | None, T_K: float, P_GPa: float) -> tuple:
     if alloy_row is not None:
-        rho = float(alloy_row.get('rho') or 6.5)
-        crystal = alloy_row.get('crystal_system') or 'cubic'
-        return _NumpyElasticity(
-            float(alloy_row['c11']),
-            float(alloy_row['c12']),
-            float(alloy_row['c44']),
-            rho,
-            T_K,
-            P_GPa,
-            crystal_system=crystal,
-            c13=alloy_row.get('c13'),
-            c33=alloy_row.get('c33'),
-        )
+        state = build_elasticity_state_from_row(alloy_row, T_K, P_GPa)
+        return state, None
     sym = os.environ.get('TWIN_METAL_SYMBOL', 'Cu')
     c11, c12, c44, rho, crystal, c13, c33, _tag = _metal_cij_fallback(sym, T_K, P_GPa)
-    return _NumpyElasticity(
-        c11, c12, c44, rho, T_K, P_GPa, crystal_system=crystal, c13=c13, c33=c33
-    )
+    preset_row = {
+        'c11': c11,
+        'c12': c12,
+        'c44': c44,
+        'rho': rho,
+        'crystal_system': crystal,
+        'c13': c13,
+        'c33': c33,
+        'cij_source': 'fallback',
+    }
+    return build_elasticity_state_from_row(preset_row, T_K, P_GPa), _tag
 
 
 def _youngs_E_surface_numpy(S_fedorov, n_phi: int, n_theta: int):
@@ -243,22 +296,12 @@ def _compute_anisotropy_numpy_fallback(
     fallback_metal: str | None = None,
 ):
     alloy_row, model_tag = _resolve_fallback_alloy_row(alloy_row, fallback_metal)
-    Eobj = _build_elasticity_numpy(alloy_row, T_K, P_GPa)
-    S_fedorov = Eobj.S_matrix_Fedorov
-    phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
-    phi_n, theta_n, M_n = _poisson_nu_max_surface_numpy(S_fedorov, n_phi, n_theta, n_chi)
-    phi_v, theta_v, M_v = _sound_vl_surface(Eobj.C_matrix, Eobj.rho, n_phi, n_theta)
-    return {
-        'T_K': round(Eobj.T, 2),
-        'P_GPa': round(Eobj.P, 3),
-        'n_phi': n_phi,
-        'n_theta': n_theta,
-        'n_chi': n_chi,
-        'model': model_tag,
-        'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
-        'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
-        'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),
-    }
+    state, _extra = _build_elasticity_numpy(alloy_row, T_K, P_GPa)
+    if model_tag == 'alloy_table' and alloy_row:
+        model_tag = f"alloy_table:{alloy_row.get('label', '')}"
+    elif _extra:
+        model_tag = _extra
+    return _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
 
 
 def _compute_anisotropy_htem(
@@ -270,44 +313,30 @@ def _compute_anisotropy_htem(
     alloy_row: dict | None = None,
 ):
     if alloy_row is not None:
-        rho = float(alloy_row.get("rho") or 6.5)
-        crystal = alloy_row.get("crystal_system") or "cubic"
-        Eobj = _NumpyElasticity(
-            float(alloy_row["c11"]),
-            float(alloy_row["c12"]),
-            float(alloy_row["c44"]),
-            rho,
-            T_K,
-            P_GPa,
-            crystal_system=crystal,
-            c13=alloy_row.get("c13"),
-            c33=alloy_row.get("c33"),
-        )
+        state = build_elasticity_state_from_row(alloy_row, T_K, P_GPa)
         model_tag = (
             f"metal_preset:{alloy_row.get('label', '')}"
             if alloy_row.get('_source') == 'metal_preset'
             else f"alloy_table:{alloy_row.get('label', '')}"
         )
-    else:
-        Eobj = build_elasticity_at_tp(T_K, P_GPa)
-        model_tag = 'HTEM_SAM'
-    S_fedorov = Eobj.S_matrix_Fedorov
+        return _bundle_from_elasticity_state(state, n_phi, n_theta, n_chi, model_tag)
 
-    phi_e, theta_e, M_e = _youngs_E_surface_numpy(S_fedorov, n_phi, n_theta)
-    phi_n, theta_n, M_n = _poisson_nu_max_surface_numpy(S_fedorov, n_phi, n_theta, n_chi)
-    phi_v, theta_v, M_v = _sound_vl_surface(Eobj.C_matrix, Eobj.rho, n_phi, n_theta)
-
-    return {
-        'T_K': round(float(Eobj.T), 2),
-        'P_GPa': round(float(Eobj.P), 3),
-        'n_phi': n_phi,
-        'n_theta': n_theta,
-        'n_chi': n_chi,
-        'model': model_tag,
-        'E': _pack_surface(phi_e, theta_e, M_e, 'GPa', aniso_squared=False),
-        'nu_max': _pack_surface(phi_n, theta_n, M_n, '1', aniso_squared=True),
-        'vl': _pack_surface(phi_v, theta_v, M_v, 'km/s', aniso_squared=True),
-    }
+    Eobj = build_elasticity_at_tp(T_K, P_GPa)
+    model_tag = 'HTEM_SAM'
+    sam_state = ElasticityState(
+        T=float(Eobj.T),
+        P=float(Eobj.P),
+        rho=float(Eobj.rho),
+        crystal_system='cubic',
+        htem_lc='C',
+        structure=None,
+        C_matrix=np.asarray(Eobj.C_matrix, dtype=float),
+        S_matrix_Fedorov=np.asarray(Eobj.S_matrix_Fedorov, dtype=float),
+        cij={},
+        cij_source='htem_sam',
+        crystal_display_zh='立方',
+    )
+    return _bundle_from_elasticity_state(sam_state, n_phi, n_theta, n_chi, model_tag)
 
 
 def _elasticity_from_alloy_cij(
@@ -493,10 +522,12 @@ def compute_anisotropy_bundle(
     fallback_metal: str | None = None,
 ):
     """
-    返回 E、nu_max、v_l 三套球面参数化数据（与论文图一致：r(θ,φ)=物理量）。
-    alloy_row：上传成分表（含 c11,c12,c44,rho）时走表中 c_ij，不经 SAM。
-    fallback_metal：仅 HTEM 不可用时的金属预设回退（Cu/Al/Ni/Ti），不得覆盖 SAM。
-    HTEM 可用且无 alloy_row 时走 Si SAM；否则自动回退 numpy。
+    返回 E、nu_max、v_l 三套球面参数化数据（r(θ,φ)=物理量，与 HTEM 论文图一致）。
+
+    alloy_row：上传成分表行（c_ij 或 moduli_hill 的 B/G），经 crystal_systems 按晶系
+              构造 C 矩阵；响应含 crystal_system / htem_lc / cij_source。
+    fallback_metal：HTEM 不可用时的金属预设回退（Cu/Al/Ni/Ti）。
+    无 alloy_row 且 HTEM 可用 → Si SAM 温压插值；否则 numpy 回退。
     """
     n_phi = max(12, min(96, int(n_phi)))
     n_theta = max(24, min(144, int(n_theta)))

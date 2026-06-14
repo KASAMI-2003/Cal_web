@@ -188,7 +188,7 @@ def ensure_alloy_cache(file_id: str, entry: dict[str, Any]) -> list[dict[str, An
 
 
 def capabilities_for_file(entry: dict[str, Any] | None, default_sam_caps: dict[str, Any] | None) -> dict[str, Any]:
-    """合并探测结果与前端需要的 T/P/成分 结构。"""
+    """合并 probe 结果与前端 T/P/成分 轴配置；moduli_hill 时附带 crystal_systems 推断信息。"""
     if not entry:
         return default_sam_caps or {}
 
@@ -222,9 +222,13 @@ def capabilities_for_file(entry: dict[str, Any] | None, default_sam_caps: dict[s
         fmt = (entry.get("probe") or {}).get("columns", {}).get("format", "cij")
         if fmt == "moduli_hill":
             cap["note"] = (
-                "成分为 wt%（+ phases）离散点；侧栏 B/G/E 取自表中 Hill/Voigt 列。"
-                " 各向异性曲面由 B、G 反推立方 c_ij 渲染（无 c11/c12/c44 时）。"
+                "成分为 wt%（+ phases）离散点；侧栏 B/G/E 取自 Hill 列。"
+                " 各向异性按 HTEM Fedorov 公式，按 phases 推断晶系（fcc/bcc→立方，hcp→六方）"
+                " 并由 B/G 反推 c_ij。"
             )
+            crystal_info = (entry.get("probe") or {}).get("crystal_systems") or {}
+            if crystal_info.get("inferred"):
+                cap["crystal_systems"] = crystal_info
         else:
             cap["note"] = (
                 "成分为表中离散名义成分；未在表中出现的 T/P 维度显示为未检测到。"

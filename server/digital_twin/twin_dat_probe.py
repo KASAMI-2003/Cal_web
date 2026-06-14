@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-探测 .dat / .xlsx 等输入：HTEM 温压网格表 vs 名义成分 + 弹性常数表（alloy_elastic 类）。
-用于数字孪生前端决定 T / P / 成分 三轴是否可用。
+探测用户上传表格（.dat / .xlsx / .csv），识别数据类型并驱动数字孪生三轴。
+
+支持的格式（按 `_probe_dataframe` 识别顺序）：
+  1. htem_grid   — T(K)、P(GPa)、C11… 温压网格 → 切换 HTEM SAM 插值
+  2. alloy_table (format=cij) — Alloy/wt% + c11/c12/c44 离散成分表
+  3. alloy_table (format=moduli_hill) — wt% + phases + BH/GH/EH/nu_H 等 Hill 模量表
+     → 经 crystal_systems 按晶系反推 c_ij，供 HTEM Fedorov 各向异性曲面
+
+模量表列优先级（与 HTEM 输出习惯一致）：
+  B/G/E/nu 优先 Hill 列（BH、GH、EH、nu_H），其次 Voigt/Reuss（BV/GV、BR/GR…）
+  晶系：phases 含 fcc/bcc→立方，hcp→六方；也可显式 crystal_system / LC 列
 """
 from __future__ import annotations
 
@@ -106,20 +115,26 @@ def read_table_from_path(path: str) -> pd.DataFrame:
     return df
 
 
+def _import_crystal_systems():
+    """延迟导入 crystal_systems，兼容包内相对导入与 pyserver 同目录导入。"""
+    try:
+        from . import crystal_systems as cs
+        return cs
+    except ImportError:
+        import crystal_systems as cs
+        return cs
+
+
 def _cubic_cij_from_bulk_shear(B: float, G: float) -> tuple[float, float, float]:
-    """由 Hill/Voigt 体模量 B、剪切模量 G 反推立方 c11/c12/c44（各向同性极限映射，供曲面渲染）。"""
-    B, G = float(B), float(G)
-    c12 = B - 2.0 * G / 3.0
-    c11 = c12 + 2.0 * G
-    c44 = G
-    return c11, c12, c44
+    cs = _import_crystal_systems()
+    cij = cs.cij_from_moduli_for_system('cubic', B, G)
+    return cij['c11'], cij['c12'], cij['c44']
 
 
 def _cubic_cij_from_E_nu(E: float, nu: float) -> tuple[float, float, float]:
-    E, nu = float(E), float(nu)
-    G = E / (2.0 * (1.0 + nu))
-    B = E / (3.0 * (1.0 - 2.0 * nu))
-    return _cubic_cij_from_bulk_shear(B, G)
+    cs = _import_crystal_systems()
+    cij = cs.cij_from_moduli_for_system('cubic', None, None, E=E, nu=nu)
+    return cij['c11'], cij['c12'], cij['c44']
 
 
 def _first_numeric(row, col: str | None) -> float | None:
@@ -153,7 +168,7 @@ def _composition_label(row, wt_col: str, phases_col: str | None) -> str:
 
 
 def _probe_dataframe(df: pd.DataFrame) -> dict[str, Any]:
-    """先识别 HTEM 温压网格，再识别 c_ij 成分表，再识别 wt%+模量表。"""
+    """识别顺序：HTEM 温压网格 → c_ij 成分表 → wt% 模量成分表。"""
     tcol = _find_col(df, "T(K)", "t(k)", "T")
     pcol = _find_col(df, "P(GPa)", "p(gpa)", "P")
     c11_htem = _find_col(df, "C11(GPa)", "c11", "C11")
@@ -315,8 +330,16 @@ def probe_alloy_table(df: pd.DataFrame) -> dict[str, Any]:
 
 def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
     """
-    HTEM / 高通量输出的 wt% + phases + B/G/E/nu（Hill/Voigt/Reuss）成分表。
-    无 c11/c12/c44 时由 B、G（或 E、ν）反推立方 c_ij 供各向异性曲面。
+    识别 wt% + phases + Hill/Voigt/Reuss 模量成分表（format=moduli_hill）。
+
+    典型表头：wt%, phases, BV, GV, BR, GR, BH, GH, Ev, nu_V, ER, nu_R, EH, nu_H, …
+
+    可视化链路：
+      探测 → load_alloy_rows → crystal_systems.enrich_alloy_row_from_moduli
+      → anisotropy_surface.build_elasticity_state_from_row → E / nu_max / v_l 曲面
+
+    注意：仅含 BH/GH 的立方行反推 c_ij 在数学上接近各向同性（E 曲面近球形）；
+    六方行或表中直接给出 c_ij 时可呈现真实各向异性。
     """
     wt_col = _find_col(df, "wt%", "wt", "wt.%", "weight", "wtpercent")
     if not wt_col:
@@ -340,6 +363,15 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
         return {"kind": "unknown", "error": "无有效数据行"}
 
     labels = [_composition_label(r, wt_col, phases_col) for _, r in df2.iterrows()]
+    crystal_col = _find_col(df, "crystal_system", "crystal", "symmetry", "LC", "晶系")
+    inferred_systems: list[str] = []
+    for _, r in df2.iterrows():
+        ph = str(r[phases_col]).strip() if phases_col and pd.notna(r.get(phases_col)) else None
+        explicit = str(r[crystal_col]).strip() if crystal_col and pd.notna(r.get(crystal_col)) else None
+        cs = _import_crystal_systems()
+        sid = cs.infer_crystal_system(ph, explicit)
+        if sid not in inferred_systems:
+            inferred_systems.append(sid)
 
     return {
         "kind": "alloy_table",
@@ -357,11 +389,17 @@ def probe_moduli_table(df: pd.DataFrame) -> dict[str, Any]:
         "columns": {
             "alloy": wt_col,
             "phases": phases_col,
+            "crystal_system": crystal_col,
             "B": b_col,
             "G": g_col,
             "E": e_col,
             "nu": nu_col,
             "format": "moduli_hill",
+        },
+        "crystal_systems": {
+            "inferred": inferred_systems,
+            "from_phases": bool(phases_col),
+            "note": "各成分点按 phases/晶系列推断 HTEM 对称性；fcc/bcc→立方，hcp→六方。",
         },
     }
 
@@ -385,7 +423,19 @@ def probe_dat_bytes(raw: bytes, filename: str = "") -> dict[str, Any]:
 
 
 def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """返回每行 {label,c11,c12,c44,rho?, B?, G?, E?, nu?} 与 probe 元数据。"""
+    """
+    解析成分表每一行为 alloy_row，供 comp_index 选取与各向异性 API 使用。
+
+    返回行字段（moduli_hill 经 enrich 后）：
+      label, phases, crystal_system, htem_lc, crystal_display_zh, structure,
+      c11…, B, G, E, nu, cij_source ('moduli_hill' | 'table_cij'), rho
+    """
+    cs = _import_crystal_systems()
+    enrich_alloy_row_from_moduli = cs.enrich_alloy_row_from_moduli
+    get_handler = cs.get_handler
+    infer_crystal_system = cs.infer_crystal_system
+    infer_structure = cs.infer_structure
+
     df = read_table_from_path(path)
     df = df.dropna(how="all")
 
@@ -397,55 +447,64 @@ def load_alloy_rows(path: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
     c = meta["columns"]
     fmt = c.get("format") or "cij"
+    crystal_col = _find_col(df, "crystal_system", "crystal", "symmetry", "LC", "晶系")
+    phases_col = c.get("phases") or _find_col(df, "phases", "phase", "相")
     rows: list[dict[str, Any]] = []
 
     for _, r in df.iterrows():
+        phases = str(r[phases_col]).strip() if phases_col and pd.notna(r.get(phases_col)) else None
+        explicit_cs = str(r[crystal_col]).strip() if crystal_col and pd.notna(r.get(crystal_col)) else None
+
         if fmt == "moduli_hill":
-            label = _composition_label(r, c["alloy"], c.get("phases"))
+            # 仅模量、无 c_ij：按 phases/晶系列选 handler，由 BH+GH 反推独立弹性常数
+            label = _composition_label(r, c["alloy"], phases_col)
             B = _first_numeric(r, c.get("B"))
             G = _first_numeric(r, c.get("G"))
             E = _first_numeric(r, c.get("E"))
             nu = _first_numeric(r, c.get("nu"))
 
-            if B is not None and G is not None:
-                c11, c12, c44 = _cubic_cij_from_bulk_shear(B, G)
-            elif E is not None and nu is not None:
-                c11, c12, c44 = _cubic_cij_from_E_nu(E, nu)
-                if B is None:
-                    B = E / (3.0 * (1.0 - 2.0 * nu))
-                if G is None:
-                    G = E / (2.0 * (1.0 + nu))
-            else:
-                continue
-
-            rowd: dict[str, Any] = {
-                "label": label,
-                "c11": c11,
-                "c12": c12,
-                "c44": c44,
-                "rho": 6.5,
-            }
+            base: dict[str, Any] = {"label": label, "phases": phases, "rho": 6.5}
             if B is not None:
-                rowd["B"] = B
+                base["B"] = B
             if G is not None:
-                rowd["G"] = G
+                base["G"] = G
             if E is not None:
-                rowd["E"] = E
+                base["E"] = E
             if nu is not None:
-                rowd["nu"] = nu
+                base["nu"] = nu
+            if not ((B is not None and G is not None) or (E is not None and nu is not None)):
+                continue
+            rowd = enrich_alloy_row_from_moduli(
+                base,
+                phases=phases,
+                crystal_system=explicit_cs,
+            )
             rows.append(rowd)
             continue
 
         rho = 6.5
         if c.get("rho") and c["rho"] in df.columns and pd.notna(r.get(c["rho"])):
             rho = float(r[c["rho"]])
+        system = infer_crystal_system(phases, explicit_cs)
         rowd = {
             "label": str(r[c["alloy"]]).strip(),
             "c11": float(r[c["c11"]]),
             "c12": float(r[c["c12"]]),
             "c44": float(r[c["c44"]]),
             "rho": rho,
+            "phases": phases,
+            "crystal_system": system,
+            "structure": infer_structure(phases),
+            "cij_source": "table_cij",
         }
+        if system == "hexagonal":
+            for hk in ("c13", "c33"):
+                hc = _find_col(df, hk.upper(), hk)
+                if hc and pd.notna(r.get(hc)):
+                    rowd[hk] = float(r[hc])
+        handler = get_handler(system)
+        rowd["htem_lc"] = handler.spec.htem_lc
+        rowd["crystal_display_zh"] = handler.spec.display_zh
         for key, names in (
             ("B", ("B", "BH", "BV", "BR")),
             ("G", ("G", "GH", "GV", "GR")),

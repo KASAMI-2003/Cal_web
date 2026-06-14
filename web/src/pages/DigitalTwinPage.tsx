@@ -57,6 +57,16 @@ interface TwinProps {
   young_modulus_GPa?: number;
   volume_scale?: number;
   model?: string;
+  /** 晶系 id，来自后端 crystal_systems（cubic / hexagonal …） */
+  crystal_system?: string;
+  /** HTEM LC 字母码：C / H / … */
+  htem_lc?: string;
+  crystal_display_zh?: string;
+  /** 结构相：fcc / bcc / hcp */
+  structure?: string;
+  phases?: string;
+  /** c_ij 来源：moduli_hill | table_cij */
+  cij_source?: string;
 }
 
 interface TwinSavedFile {
@@ -112,13 +122,14 @@ function materialModeLabel(mode: MaterialMode): string {
   return mode === 'htem' ? 'HTEM Si SAM' : `金属预设 ${mode}`;
 }
 
-function surfaceStatusFromModel(model: string, mode: MaterialMode): string {
+function surfaceStatusFromModel(model: string, mode: MaterialMode, crystal?: string): string {
+  const crystalNote = crystal ? ` · ${crystal}晶系` : '';
   if (model.startsWith('metal_preset_') || model.startsWith('metal_preset:')) {
     const sym = model.split(':').pop()?.replace('metal_preset_', '') || mode;
-    return `已加载 ${sym} 论文 VASP 各向异性曲面 (${model})`;
+    return `已加载 ${sym} 论文 VASP 各向异性曲面 (${model})${crystalNote}`;
   }
   if (model.startsWith('alloy_table:')) {
-    return `已加载上传成分表曲面 (${model})`;
+    return `已加载上传成分表 HTEM 各向异性曲面 (${model})${crystalNote}`;
   }
   if (model === 'numpy_fallback_si' || model.startsWith('numpy_fallback')) {
     return '警告：HTEM SAM 不可用，当前为 Si 占位曲面。请确认 server/digital_twin/HTEM-main 存在并重启后端。';
@@ -581,7 +592,7 @@ export function DigitalTwinPage() {
         setSurfaceData(json);
         if (!params?.silent) {
           const model = String(json?.model ?? '');
-          setStatus(surfaceStatusFromModel(model, materialMode));
+          setStatus(surfaceStatusFromModel(model, materialMode, json?.crystal_display_zh ?? json?.crystal_system));
         }
       }
       return json;
@@ -617,6 +628,7 @@ export function DigitalTwinPage() {
       <div><strong>G</strong> ${Number(props.shear_modulus_GPa ?? NaN).toFixed(3)} GPa${showDelta && prev ? formatDelta(prev.shear_modulus_GPa, props.shear_modulus_GPa, 3) : ''}</div>
       <div><strong>E</strong> ${Number(props.young_modulus_GPa ?? NaN).toFixed(3)} GPa${showDelta && prev ? formatDelta(prev.young_modulus_GPa, props.young_modulus_GPa, 3) : ''}</div>
       <div><strong>V/V0</strong> ${Number(props.volume_scale ?? NaN).toFixed(5)}${showDelta && prev ? formatDelta(prev.volume_scale, props.volume_scale, 5) : ''}</div>
+      ${props.crystal_display_zh || props.crystal_system ? `<div><strong>晶系</strong> ${String(props.crystal_display_zh ?? props.crystal_system ?? '')}${props.structure ? ` (${props.structure})` : ''}${props.phases ? ` · ${props.phases}` : ''}</div>` : ''}
       <div><strong>model</strong> <code>${String(props.model ?? '')}</code></div>
     `;
     setMetricsHtml(html);
@@ -720,7 +732,7 @@ export function DigitalTwinPage() {
       const latest = await fetchSurface({ fileId: '', compIndex: 0, cacheBust: ts });
       if (latest) {
         rerenderVisibleWindows(latest);
-        setStatus(surfaceStatusFromModel(String(latest?.model ?? ''), mode));
+        setStatus(surfaceStatusFromModel(String(latest?.model ?? ''), mode, latest?.crystal_display_zh ?? latest?.crystal_system));
       }
     } catch (error) {
       setStatus(`切换材料失败: ${(error as Error).message}`);

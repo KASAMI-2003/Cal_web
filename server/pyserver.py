@@ -633,7 +633,10 @@ def _twin_material_context(qs):
 
 
 def twin_properties_for_request(T_K, P_GPa, qs):
-    """侧栏标量：上传成分为 alloy_table 时用表中 B/G/E（或由 cij 估算），否则走 SAM/占位。"""
+    """
+    侧栏标量 B/G/E：上传成分为 alloy_table 时用表中 Hill 列；
+    同时返回 crystal_system / phases 等晶系字段供前端展示。
+    """
     row, _fallback, mode = _twin_material_context(qs)
     if row is not None:
         c11, c12, c44 = float(row['c11']), float(row['c12']), float(row['c44'])
@@ -665,6 +668,12 @@ def twin_properties_for_request(T_K, P_GPa, qs):
             'young_modulus_GPa': round(E, 2),
             'volume_scale': 1.0,
             'model': model,
+            'crystal_system': row.get('crystal_system'),
+            'htem_lc': row.get('htem_lc'),
+            'crystal_display_zh': row.get('crystal_display_zh'),
+            'structure': row.get('structure'),
+            'phases': row.get('phases'),
+            'cij_source': row.get('cij_source'),
         }
     return twin_properties_placeholder(T_K, P_GPa)
 
@@ -812,7 +821,7 @@ class MyRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif path == '/api/digital_twin/anisotropy_surface':
-            # 返回 E、nu_max、v_l 的球面参数化网格（与 HTEM anisotropy 一致），供 Three.js 绘制各向异性曲面
+            # HTEM Fedorov 各向异性：E / nu_max / v_l 球面网格；上传表走 crystal_systems 按晶系算 C_ij
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
             try:
